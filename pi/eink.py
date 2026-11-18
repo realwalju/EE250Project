@@ -1,8 +1,8 @@
 """Draws the companion screen and sends it to the e-ink display.
 
-Supports Waveshare e-paper displays (pass the driver name, e.g. epd7in5_V2,
-with --eink-model or the EINK_MODEL environment variable) and Pimoroni Inky
-displays (detected automatically).
+Defaults to our Waveshare 7.3" Spectra 6 panel (driver epd7in3e). Another
+Waveshare panel can be chosen with --eink-model or EINK_MODEL, and
+--eink-model inky uses a Pimoroni Inky instead.
 
 Layout: the companion's face on the left, its current message on the right,
 session stats and room info along the bottom.
@@ -25,6 +25,7 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 
 PREVIEW_PATH = os.path.join(os.path.dirname(__file__), "eink_preview.png")
+DEFAULT_MODEL = "epd7in3e"  # Waveshare 7.3" E Ink Spectra 6, 800x480
 DEFAULT_SIZE = (800, 480)  # used for the preview; the real size is read from the display
 
 BLACK, WHITE = (0, 0, 0), (255, 255, 255)
@@ -193,9 +194,9 @@ class EinkDisplay:
         self.pending_force = False
         self.busy = False
         self.lock = threading.Lock()
-        model = model or os.environ.get("EINK_MODEL")
+        model = model or os.environ.get("EINK_MODEL") or DEFAULT_MODEL
         try:
-            self.backend = _Waveshare(model, color) if model else _Inky()
+            self.backend = _Inky() if model == "inky" else _Waveshare(model, color)
             self.size = self.backend.size
             print(f"e-ink: using {self.backend.name} {self.size}")
         except Exception as e:

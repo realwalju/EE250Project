@@ -285,7 +285,7 @@ def main():
     parser.add_argument("--db", default="desk.db")
     parser.add_argument("--web-port", type=int, default=5000)
     parser.add_argument("--no-eink", action="store_true", help="don't drive the e-ink display")
-    parser.add_argument("--eink-model", help="Waveshare driver name, e.g. epd7in5_V2 (omit for Pimoroni Inky)")
+    parser.add_argument("--eink-model", help="Waveshare driver name (default epd7in3e, our 7.3\" Spectra 6), or inky")
     parser.add_argument("--eink-color", choices=["auto", "mono", "color"], default="auto",
                         help="force black/white or colour output for a Waveshare panel")
     args = parser.parse_args()
