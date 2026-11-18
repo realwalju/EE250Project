@@ -28,8 +28,11 @@ pc/
   test_publisher.py  Sends fake game events so everything can be tested without Fortnite
   detector.py        Screen-capture event detector (template matching) + PC activity
   templates/         Cropped images of on-screen messages, one folder per event
+tests/
+  test_system.py  Automated tests (no hardware needed): python -m pytest tests -q
 docs/
   overview.md     Project overview / design doc
+  video_plan.md   Shot list for the 4-minute demo video
 ```
 
 ## MQTT topics

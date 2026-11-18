@@ -67,17 +67,19 @@ class TiltDetector:
             self.vib.append((now, count))
         return self._check(now)
 
-    def vib_total(self, now):
+    def vib_total(self, now, since=None):
+        """Pulses in the sliding window (optionally only those at or after `since`)."""
         while self.vib and now - self.vib[0][0] > self.vib_window:
             self.vib.popleft()
-        return sum(c for _, c in self.vib)
+        return sum(c for ts, c in self.vib if since is None or ts >= since)
 
     def _check(self, now):
         if self.last_bad_event is None or now - self.last_bad_event > self.event_window:
             return False
         if self.last_tilt is not None and now - self.last_tilt < self.cooldown:
             return False
-        if self.vib_total(now) >= self.vib_threshold:
+        # Only slams AFTER the bad event count - that's what makes it a reaction.
+        if self.vib_total(now, since=self.last_bad_event) >= self.vib_threshold:
             self.last_tilt = now
             return True
         return False
