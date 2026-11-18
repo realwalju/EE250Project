@@ -1,0 +1,95 @@
+# Fortnite Desk Companion (EE250 Final Project)
+
+**Team:** [Name 1], [Name 2]
+
+A desk system that reacts to Fortnite games in real time. The gaming PC detects
+game events from the screen with computer vision, a Raspberry Pi 5 hub turns them
+into lighting effects, an OBS overlay and LLM-written recaps on an e-ink "desk
+companion", and our custom ESP32-S3 sensor PCB adds a button, a status LED and
+room sensors (light, temperature, desk vibration).
+
+See [`docs/overview.md`](docs/overview.md) for the full design.
+
+> Submission note: the course asks for a `README.txt`. Before submitting,
+> export this file to `README.txt` (team names, run instructions, libraries).
+
+## Repository layout
+
+```
+esp32/
+  sensor_board/   ESP32-S3 on our custom PCB: button, LED, light, temp, vibration
+  mood_light/     ESP32-S3 using its built-in RGB LED for live game effects
+pi/
+  hub.py          Central hub: MQTT logic, match state, tilt detection, SQLite log
+  mosquitto.conf  MQTT broker config for the Pi
+pc/
+  test_publisher.py  Sends fake game events so everything can be tested without Fortnite
+  detector.py        Screen-capture event detector (work in progress)
+docs/
+  overview.md     Project overview / design doc
+```
+
+## MQTT topics
+
+| Topic | From -> to | Example payload |
+|---|---|---|
+| `desk/game/event` | PC -> Pi | `{"type":"elim"}` (`match_start`, `elim`, `knocked`, `eliminated`, `victory`, `match_end`) |
+| `desk/pc/activity` | PC -> Pi | `{"app":"FortniteClient","input_rate":42}` |
+| `desk/leds/effect` | Pi -> mood light | `{"effect":"victory"}` |
+| `desk/input/button` | Sensor board -> Pi | `{"id":"clip","press":"short"}` |
+| `desk/sensors` | Sensor board -> Pi | `{"light_pct":63,"temp_c":23.4,"vib":2}` |
+| `desk/notify` | Pi -> sensor board | `{"msg":1}` (LED double-blinks) |
+
+## Setup
+
+All devices must be on the same network. Use a phone hotspot for demos, since
+campus Wi-Fi usually blocks device-to-device traffic. Give the Pi a fixed IP
+(or note it) so the ESP32s can reach the broker.
+
+### 1. Raspberry Pi (broker + hub)
+
+```bash
+sudo apt install mosquitto mosquitto-clients
+sudo cp pi/mosquitto.conf /etc/mosquitto/conf.d/ee250.conf
+sudo systemctl restart mosquitto
+
+cd pi
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python hub.py --broker localhost
+```
+
+### 2. ESP32-S3 boards (Arduino IDE)
+
+1. Install the **esp32 by Espressif** board package (version 3.x) in Boards Manager.
+2. Install libraries: **PubSubClient** (Nick O'Leary) and **OneButton** (Matthias Hertel).
+3. In each sketch folder, copy `secrets_example.h` to `secrets.h` and fill in
+   your Wi-Fi name/password and the Pi's IP address. `secrets.h` is gitignored.
+4. Board: **ESP32S3 Dev Module**. Upload `esp32/sensor_board` to the board on our
+   PCB and `esp32/mood_light` to a second S3.
+
+The YD-ESP32-S3's built-in RGB LED is on GPIO 48. On some board revisions it
+only works after bridging the small solder pad labeled **RGB**.
+
+### 3. Test without the game
+
+```bash
+cd pc
+pip install -r requirements.txt
+python test_publisher.py --broker <PI_IP>          # interactive keys
+python test_publisher.py --broker <PI_IP> --demo   # scripted fake match
+```
+
+Watch everything with `mosquitto_sub -h <PI_IP> -t 'desk/#' -v`.
+
+## External libraries
+
+- **Python:** paho-mqtt, mss, opencv-python, numpy
+- **ESP32:** Arduino-ESP32 core 3.x, PubSubClient, OneButton
+- **Pi:** Mosquitto MQTT broker, SQLite (Python standard library)
+
+## AI tool use
+
+Initial project structure and starter code were generated with assistance from
+Claude (Anthropic). AI-assisted files are marked with a comment at the top. We
+reviewed, tested and modified the code ourselves.

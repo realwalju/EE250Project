@@ -1,0 +1,24 @@
+# Secrets (Wi-Fi passwords, API keys) - never commit these
+secrets.h
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local data
+*.db
+*.sqlite
+recordings/
+
+# PlatformIO / Arduino build output
+.pio/
+build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
