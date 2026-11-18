@@ -1,0 +1,7 @@
+dependencies:
+  # ESP-IDF v6 moved esp-mqtt out of the core into the component registry.
+  # On v5 the built-in "mqtt" component is used instead (see CMakeLists.txt).
+  espressif/mqtt:
+    version: "*"
+    rules:
+      - if: "idf_version >=6.0"

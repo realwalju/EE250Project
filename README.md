@@ -15,7 +15,7 @@ See [`docs/overview.md`](docs/overview.md) for the full design.
 ## Repository layout
 
 ```
-esp32/                ESP-IDF v5.x projects
+esp32/                ESP-IDF v5/v6 projects
   components/desk_net/  Shared Wi-Fi + MQTT code for both boards
   sensor_board/   ESP32-S3 on our custom PCB: button, LED, light, temp, vibration
   mood_light/     ESP32-S3 using its built-in RGB LED for live game effects
@@ -88,7 +88,7 @@ Inky, use `--eink-model inky`.
 
 The hub also serves the dashboard at `http://<PI_IP>:5000/` (open it on the laptop).
 
-### 2. ESP32-S3 boards (ESP-IDF v5.x)
+### 2. ESP32-S3 boards (ESP-IDF v5 or v6)
 
 Both boards are ESP-IDF projects that share `esp32/components/desk_net`
 (Wi-Fi + MQTT). In each project folder, copy `secrets_example.h` to `secrets.h`
@@ -136,7 +136,7 @@ Watch everything with `mosquitto_sub -h <PI_IP> -t 'desk/#' -v`.
 ## External libraries
 
 - **Python:** paho-mqtt, mss, opencv-python, numpy
-- **ESP32:** ESP-IDF v5.x (Wi-Fi, esp-mqtt, LEDC, GPIO interrupts, ADC oneshot + calibration), Espressif `led_strip`
+- **ESP32:** ESP-IDF v5/v6 (Wi-Fi, esp-mqtt, LEDC, GPIO interrupts, ADC oneshot + calibration), Espressif `led_strip`
 - **Pi:** Mosquitto MQTT broker, SQLite (Python standard library), Flask, Pillow,
   Waveshare `waveshare_epd` (or Pimoroni `inky`), gpiozero, lgpio, spidev, Anthropic Python SDK
 

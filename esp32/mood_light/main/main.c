@@ -1,4 +1,4 @@
-// Mood light: ESP32-S3 (YD-ESP32-S3) using its built-in RGB LED, ESP-IDF v5.x.
+// Mood light: ESP32-S3 (YD-ESP32-S3) using its built-in RGB LED, ESP-IDF v5/v6.
 //
 // Subscribes to desk/leds/effect and plays effects locally, so animations
 // stay smooth even if Wi-Fi lags. The Pi only sends short commands like
@@ -196,8 +196,8 @@ void app_main(void)
     led_strip_config_t strip_cfg = {
         .strip_gpio_num = PIN_RGB,
         .max_leds = 1,
-        .led_pixel_format = LED_PIXEL_FORMAT_GRB,
         .led_model = LED_MODEL_WS2812,
+        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
         .flags.invert_out = false,
     };
     led_strip_rmt_config_t rmt_cfg = {

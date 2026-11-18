@@ -1,4 +1,4 @@
-# Desk sensor board (ESP32-S3 on our custom PCB) - ESP-IDF v5.x project
+# Desk sensor board (ESP32-S3 on our custom PCB) - ESP-IDF v5/v6 project
 cmake_minimum_required(VERSION 3.16)
 # Shared Wi-Fi + MQTT code lives in esp32/components/desk_net
 set(EXTRA_COMPONENT_DIRS ../components)

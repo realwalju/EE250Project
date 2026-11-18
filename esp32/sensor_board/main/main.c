@@ -1,4 +1,4 @@
-// Desk sensor board: ESP32-S3 (YD-ESP32-S3) on our custom PCB, ESP-IDF v5.x.
+// Desk sensor board: ESP32-S3 (YD-ESP32-S3) on our custom PCB, ESP-IDF v5/v6.
 //
 // Reads the button, light sensor, thermistor and vibration switch, publishes
 // them over MQTT, and drives the status LED.

@@ -1,4 +1,4 @@
-# Mood light (ESP32-S3 built-in RGB LED) - ESP-IDF v5.x project
+# Mood light (ESP32-S3 built-in RGB LED) - ESP-IDF v5/v6 project
 cmake_minimum_required(VERSION 3.16)
 # Shared Wi-Fi + MQTT code lives in esp32/components/desk_net
 set(EXTRA_COMPONENT_DIRS ../components)
