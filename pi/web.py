@@ -1,10 +1,7 @@
-"""Web dashboard and OBS overlay, served by the hub on port 5000.
+"""Web dashboard, served by the hub at http://<PI_IP>:5000/ (open it on the laptop).
 
-  http://<PI_IP>:5000/          dashboard (laptop browser)
-  http://<PI_IP>:5000/overlay   OBS browser source (1920x1080, transparent)
-
-Both pages poll small JSON endpoints, which keeps everything simple and
-works fine on a local network.
+The page polls small JSON endpoints once a second, which keeps everything
+simple and works fine on a local network.
 
 AI-assisted: initial version generated with Claude (Anthropic), then reviewed
 and tested by the team.
@@ -28,10 +25,6 @@ def create_app(hub):
     @app.get("/")
     def dashboard():
         return DASHBOARD_HTML
-
-    @app.get("/overlay")
-    def overlay():
-        return OVERLAY_HTML
 
     return app
 
@@ -63,6 +56,7 @@ DASHBOARD_HTML = """<!doctype html>
     <div class="row"><span class="muted">Match elims</span><span id="elims">-</span></div>
     <div class="row"><span class="muted">Match knocks</span><span id="knocks">-</span></div>
     <div class="row"><span class="muted">Session</span><span id="session">-</span></div>
+    <div class="row"><span class="muted">PC app</span><span id="app">-</span></div>
   </div>
   <div class="card"><h2>Companion</h2>
     <div class="big" id="mood">-</div>
@@ -92,6 +86,8 @@ async function poll() {
     $('knocks').textContent = s.match ? s.match.knocks : '-';
     const ss = s.companion.session;
     $('session').textContent = `${ss.games} games, ${ss.wins} wins, ${ss.elims} elims`;
+    const a = s.activity || {};
+    $('app').textContent = a.app ? (a.gaming ? 'Fortnite' : a.app.slice(0, 30)) : '-';
     $('mood').textContent = s.companion.mood;
     $('message').textContent = s.companion.message;
     $('recap').textContent = s.companion.last_recap ? 'Last recap: ' + s.companion.last_recap.text : '';
@@ -117,64 +113,5 @@ async function poll() {
   } catch (err) { $('status').textContent = 'offline'; $('status').className = 'bad'; }
 }
 poll(); setInterval(poll, 1000);
-</script></body></html>
-"""
-
-OVERLAY_HTML = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Overlay</title>
-<style>
-  html, body { margin: 0; width: 1920px; height: 1080px; background: transparent; overflow: hidden;
-               font-family: 'Arial Black', Impact, sans-serif; }
-  #flash { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
-  #banner { position: absolute; top: 180px; width: 100%; text-align: center; font-size: 110px;
-            color: #fff; opacity: 0; text-shadow: 0 0 12px rgba(0,0,0,.8), 0 6px 0 rgba(0,0,0,.6);
-            letter-spacing: 4px; }
-  #bubble { position: absolute; right: 40px; bottom: 40px; max-width: 520px; padding: 18px 24px;
-            background: rgba(10,12,16,.85); color: #fff; border-radius: 18px; font-family: system-ui, sans-serif;
-            font-size: 26px; font-weight: 600; border: 3px solid #fff; opacity: 0; transition: opacity .4s; }
-  #bubble small { display: block; font-size: 16px; opacity: .7; text-transform: uppercase; margin-bottom: 6px; }
-  .show { animation: pop 2.2s ease-out forwards; }
-  .flash { animation: fl .8s ease-out forwards; }
-  @keyframes pop { 0% { opacity: 0; transform: scale(.6); } 12% { opacity: 1; transform: scale(1.08); }
-                   20% { transform: scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
-  @keyframes fl { 0% { opacity: .45; } 100% { opacity: 0; } }
-</style></head><body>
-<div id="flash"></div><div id="banner"></div>
-<div id="bubble"><small id="mood"></small><span id="text"></span></div>
-<script>
-const FX = {
-  elim:       { text: 'ELIMINATION',    color: '#ffffff' },
-  knocked:    { text: 'KNOCKED',        color: '#ff3b3b' },
-  eliminated: { text: 'ELIMINATED',     color: '#ff3b3b' },
-  victory:    { text: 'VICTORY ROYALE', color: '#ffc629' },
-  tilt:       { text: 'TILT DETECTED',  color: '#ff8a00' },
-};
-const banner = document.getElementById('banner'), flash = document.getElementById('flash');
-let lastId = null, bubbleTimer = null;
-function play(name) {
-  const fx = FX[name]; if (!fx) return;
-  banner.textContent = fx.text; banner.style.color = fx.color;
-  flash.style.background = fx.color;
-  for (const el of [banner, flash]) { el.className = ''; void el.offsetWidth; }
-  banner.className = 'show'; flash.className = 'flash';
-}
-function say(mood, text) {
-  document.getElementById('mood').textContent = mood;
-  document.getElementById('text').textContent = text;
-  const b = document.getElementById('bubble'); b.style.opacity = 1;
-  clearTimeout(bubbleTimer); bubbleTimer = setTimeout(() => b.style.opacity = 0, 9000);
-}
-async function poll() {
-  try {
-    if (lastId === null) { lastId = (await (await fetch('/api/state')).json()).last_id; return; }
-    const ev = await (await fetch('/api/events?since=' + lastId)).json();
-    for (const e of ev.events) {
-      if (e.kind === 'effect') play(e.data.effect);
-      if (e.kind === 'companion') say(e.data.mood, e.data.message);
-    }
-    lastId = ev.last_id;
-  } catch (err) {}
-}
-setInterval(poll, 250);
 </script></body></html>
 """

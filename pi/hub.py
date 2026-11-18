@@ -3,7 +3,7 @@
 Subscribes to every device over MQTT, tracks match state, detects tilt by
 combining game events with desk vibration, tells the mood light which effect
 to play, logs everything to SQLite, drives the e-ink companion, and serves the
-web dashboard and OBS overlay (see web.py).
+web dashboard (see web.py).
 
 AI-assisted: initial version generated with Claude (Anthropic), then reviewed
 and tested by the team.
@@ -128,7 +128,7 @@ class Hub:
         self.study_mode = False
         self.latest_sensors = {}
         self.latest_activity = {}
-        self.feed = deque(maxlen=500)  # recent events for the dashboard/overlay
+        self.feed = deque(maxlen=500)  # recent events for the dashboard
         self.feed_id = 0
         self.db = sqlite3.connect(db_path, check_same_thread=False)
         self._init_db()
@@ -168,6 +168,7 @@ class Hub:
                 "match": ({k: self.match.stats[k] for k in ("match_id", "elims", "knocks")}
                           if self.match.in_match else None),
                 "sensors": self.latest_sensors,
+                "activity": self.latest_activity,
                 "vib_recent": self.tilt.vib_total(time.time()),
                 "companion": self.companion.snapshot(),
                 "matches": matches,
@@ -295,12 +296,12 @@ def main():
         display = EinkDisplay(min_interval=60)
     hub = Hub(publish, args.db, display=display)
 
-    # Web dashboard + OBS overlay in a background thread
+    # Web dashboard in a background thread
     from web import create_app
     app = create_app(hub)
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=args.web_port, threaded=True),
                      daemon=True).start()
-    print(f"dashboard: http://<this Pi's IP>:{args.web_port}/   overlay: /overlay")
+    print(f"dashboard: http://<this Pi's IP>:{args.web_port}/")
 
     # Refresh the e-ink every 10 minutes so the clock and stats stay current
     def eink_timer():

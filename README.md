@@ -4,8 +4,7 @@
 
 A desk system that reacts to Fortnite games in real time. The gaming PC detects
 game events from the screen with computer vision, a Raspberry Pi 5 hub turns them
-into lighting effects, an OBS overlay and LLM-written recaps on an e-ink "desk
-companion", and our custom ESP32-S3 sensor PCB adds a button, a status LED and
+into lighting effects and LLM-written recaps on an e-ink "desk companion", and our custom ESP32-S3 sensor PCB adds a button, a status LED and
 room sensors (light, temperature, desk vibration).
 
 See [`docs/overview.md`](docs/overview.md) for the full design.
@@ -23,11 +22,12 @@ pi/
   hub.py          Central hub: MQTT logic, match state, tilt detection, SQLite log
   companion.py    Companion mood, quick reactions, LLM post-match recaps
   eink.py         Draws the companion screen for the Inky e-ink display
-  web.py          Flask dashboard (/) and OBS overlay (/overlay)
+  web.py          Flask dashboard
   mosquitto.conf  MQTT broker config for the Pi
 pc/
   test_publisher.py  Sends fake game events so everything can be tested without Fortnite
-  detector.py        Screen-capture event detector (work in progress)
+  detector.py        Screen-capture event detector (template matching) + PC activity
+  templates/         Cropped images of on-screen messages, one folder per event
 docs/
   overview.md     Project overview / design doc
 ```
@@ -68,9 +68,7 @@ Options). If the old InkyPi software is installed, stop it so it doesn't fight
 for the display: `sudo systemctl disable --now inkypi`. Without a display
 (or with `--no-eink`) the hub saves `pi/eink_preview.png` instead.
 
-The hub also serves:
-- **Dashboard:** `http://<PI_IP>:5000/` (open on the laptop)
-- **OBS overlay:** `http://<PI_IP>:5000/overlay` (add as a Browser Source, 1920x1080)
+The hub also serves the dashboard at `http://<PI_IP>:5000/` (open it on the laptop).
 
 ### 2. ESP32-S3 boards (Arduino IDE)
 
@@ -94,6 +92,15 @@ python test_publisher.py --broker <PI_IP> --demo   # scripted fake match
 ```
 
 Watch everything with `mosquitto_sub -h <PI_IP> -t 'desk/#' -v`.
+
+### 4. Game detection (gaming PC)
+
+1. `python detector.py --save-every 2` while playing saves screenshots to `pc/recordings/`.
+2. Crop each on-screen message (Victory Royale, knocked, eliminated, your elims)
+   into `pc/templates/<event>/` - see [`pc/templates/README.md`](pc/templates/README.md).
+3. `python detector.py --test recordings` scores the screenshots so you can check
+   templates and thresholds offline.
+4. `python detector.py --broker <PI_IP>` runs it live (`--debug` prints scores).
 
 ## External libraries
 

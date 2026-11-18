@@ -1,10 +1,10 @@
 # Fortnite Desk Companion: EE250 Final Project
 
-**Team:** [Name 1], [Name 2]
+**Team:** Walton, Andrea
 **Due:** December 7, 2026
 
 ## Summary
-A desk system that reacts to your Fortnite games in real time and keeps track of your day. A program on the gaming PC watches the game screen with computer vision and detects events like eliminations, getting knocked and Victory Royales. A Raspberry Pi 5 acts as the central hub. It turns those events into lighting effects on ESP32-S3 nodes and an OBS stream overlay, combines them with room sensor data, and uses an LLM to give an e-ink "desk companion" a personality. The companion reacts to your matches, writes post-match coaching recaps and nudges you about study time.
+A desk system that reacts to your Fortnite games in real time and keeps track of your day. A program on the gaming PC watches the game screen with computer vision and detects events like eliminations, getting knocked and Victory Royales. A Raspberry Pi 5 acts as the central hub. It turns those events into lighting effects on ESP32-S3 nodes, combines them with room sensor data, and uses an LLM to give an e-ink "desk companion" a personality. The companion reacts to your matches, writes post-match coaching recaps and nudges you about study time.
 
 ## System nodes
 
@@ -20,7 +20,7 @@ A desk system that reacts to your Fortnite games in real time and keeps track of
 ## Data flow
 1. The gaming PC detects a game event and publishes it over MQTT to the Pi.
 2. The Pi updates match state, logs the event and decides how to respond.
-3. The Pi sends a light effect to the mood light and pushes the event to the OBS overlay.
+3. The Pi sends a light effect to the mood light and logs the event for the dashboard.
 4. The desk sensor board sends button presses and sensor readings to the Pi.
 5. After each match, the Pi sends the match timeline to the LLM API and shows the recap on the e-ink screen.
 
@@ -50,24 +50,23 @@ In one line: PC sees, Pi decides, ESP32s show and take input, e-ink and dashboar
 | Mood light (RGB LED) | Under 1 second | White pulse = elimination, red flash = knocked, gold = Victory Royale, orange flicker = tilt, blue = study mode |
 | PCB status LED | Instant | Breathing = connected, fast blink = disconnected, double blink = new message, flash = button received |
 | E-ink display | Every match / every 10-15 min | Companion face and mood, LLM recap, session stats, nudges |
-| OBS overlay | Real time | Game effects and companion reactions on stream |
 | Web dashboard | Real time | Event timeline, match history, sensor graphs |
 
 ## Key design choices
 - **Vision runs on the PC, not the Pi.** Only small event messages cross Wi-Fi, not video.
 - **Light animations are stored on the ESP32.** The Pi sends short commands, so effects stay smooth even if Wi-Fi lags.
 - **The LLM stays out of the real-time path.** Lights react instantly from our own detection code, so a slow API never delays them.
-- **No extra purchases.** Everything uses hardware we already have: built-in LEDs, our sensor PCB, the Pi and e-ink screen, and an OBS overlay for on-stream effects.
+- **No extra purchases.** Everything uses hardware we already have: built-in LEDs, our sensor PCB, and the Pi with its e-ink screen.
 
 ## Timeline
 - **Nov 17-23:** MQTT working end to end. Sensor board code (button, LED, sensors). Mood light reacting to test messages. Pi receives and logs everything.
 - **Nov 24-30:** Computer vision detection on the PC using recorded gameplay. Match state tracking and tilt detection on the Pi.
-- **Dec 1-4:** LLM recaps and companion, e-ink layouts, web dashboard, OBS overlay.
-- **Dec 5-7:** Replay mode for the demo, bug fixes, README, 2-page write-up with block diagram, 4-minute video.
+- **Dec 1-4:** LLM recaps and companion, e-ink layouts, web dashboard.
+- **Dec 5-7:** Bug fixes, README, 2-page write-up with block diagram, record the 4-minute video of the system in use.
 
 ## Risks and limitations
 - **Detection accuracy:** depends on game resolution and UI scale. We tune it on recorded gameplay.
-- **Demo setup:** campus Wi-Fi may block device-to-device traffic, so we use a phone hotspot. A replay mode feeds recorded gameplay through the system in case the game can't run live.
+- **Demo setup:** campus Wi-Fi may block device-to-device traffic, so we use a phone hotspot. The demo is live, plus the recorded video.
 - **Subtle lights:** the built-in RGB LED is small. A WS2812 LED strip on the same MQTT topic would scale it up with no code changes.
 - **LLM:** needs internet and costs a few dollars over the whole project. Recaps arrive a few seconds after each match.
 - **Thermistor accuracy:** needs the part's Beta value. Readings are approximate.
