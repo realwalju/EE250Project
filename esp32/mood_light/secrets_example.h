@@ -4,5 +4,5 @@
 
 #define WIFI_SSID "your-hotspot-name"
 #define WIFI_PASS "your-hotspot-password"
-#define MQTT_HOST "192.168.1.50"  // the Raspberry Pi's IP address
+#define MQTT_HOST "172.20.10.2"  // the Raspberry Pi's IP address
 #define MQTT_PORT 1883

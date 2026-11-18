@@ -14,9 +14,13 @@ eink_preview.png
 *.sqlite
 recordings/
 
-# PlatformIO / Arduino build output
-.pio/
+# ESP-IDF / build output
 build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+.pio/
 
 # OS / editor
 .DS_Store

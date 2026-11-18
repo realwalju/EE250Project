@@ -15,7 +15,8 @@ See [`docs/overview.md`](docs/overview.md) for the full design.
 ## Repository layout
 
 ```
-esp32/
+esp32/                ESP-IDF v5.x projects
+  components/desk_net/  Shared Wi-Fi + MQTT code for both boards
   sensor_board/   ESP32-S3 on our custom PCB: button, LED, light, temp, vibration
   mood_light/     ESP32-S3 using its built-in RGB LED for live game effects
 pi/
@@ -87,14 +88,27 @@ Inky, use `--eink-model inky`.
 
 The hub also serves the dashboard at `http://<PI_IP>:5000/` (open it on the laptop).
 
-### 2. ESP32-S3 boards (Arduino IDE)
+### 2. ESP32-S3 boards (ESP-IDF v5.x)
 
-1. Install the **esp32 by Espressif** board package (version 3.x) in Boards Manager.
-2. Install libraries: **PubSubClient** (Nick O'Leary) and **OneButton** (Matthias Hertel).
-3. In each sketch folder, copy `secrets_example.h` to `secrets.h` and fill in
-   your Wi-Fi name/password and the Pi's IP address. `secrets.h` is gitignored.
-4. Board: **ESP32S3 Dev Module**. Upload `esp32/sensor_board` to the board on our
-   PCB and `esp32/mood_light` to a second S3.
+Both boards are ESP-IDF projects that share `esp32/components/desk_net`
+(Wi-Fi + MQTT). In each project folder, copy `secrets_example.h` to `secrets.h`
+and fill in your hotspot name, password and the Pi's IP (`secrets.h` is
+gitignored). The ESP32-S3 only does 2.4 GHz Wi-Fi: on an iPhone hotspot, turn on
+**Maximize Compatibility**.
+
+From the ESP-IDF terminal, with the board on its **COM** (UART) USB port:
+
+```
+cd esp32\sensor_board
+idf.py set-target esp32s3
+idf.py build
+idf.py -p COM5 flash monitor
+```
+
+Replace `COM5` with your port; exit the monitor with Ctrl+]. Do the same in
+`esp32\mood_light` for the second board (its first build downloads Espressif's
+`led_strip` driver). If flashing fails to connect, hold BOOT, tap RST, release
+BOOT and try again.
 
 The YD-ESP32-S3's built-in RGB LED is on GPIO 48. On some board revisions it
 only works after bridging the small solder pad labeled **RGB**.
@@ -122,7 +136,7 @@ Watch everything with `mosquitto_sub -h <PI_IP> -t 'desk/#' -v`.
 ## External libraries
 
 - **Python:** paho-mqtt, mss, opencv-python, numpy
-- **ESP32:** Arduino-ESP32 core 3.x, PubSubClient, OneButton
+- **ESP32:** ESP-IDF v5.x (Wi-Fi, esp-mqtt, LEDC, GPIO interrupts, ADC oneshot + calibration), Espressif `led_strip`
 - **Pi:** Mosquitto MQTT broker, SQLite (Python standard library), Flask, Pillow,
   Waveshare `waveshare_epd` (or Pimoroni `inky`), gpiozero, lgpio, spidev, Anthropic Python SDK
 
