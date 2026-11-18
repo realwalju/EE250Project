@@ -28,8 +28,9 @@ PREVIEW_PATH = os.path.join(os.path.dirname(__file__), "eink_preview.png")
 DEFAULT_SIZE = (800, 480)  # used for the preview; the real size is read from the display
 
 BLACK, WHITE = (0, 0, 0), (255, 255, 255)
-ACCENT = {"happy": (0, 140, 0), "smug": (220, 120, 0), "worried": (200, 0, 0),
-          "sleepy": (0, 0, 200), "calm": (0, 0, 200), "neutral": BLACK}
+# Pure colours that exist as inks on 6/7-colour e-paper
+ACCENT = {"happy": (0, 255, 0), "smug": (255, 0, 0), "worried": (255, 0, 0),
+          "sleepy": (0, 0, 255), "calm": (0, 0, 255), "neutral": BLACK}
 
 
 def _font(size, bold=False):
@@ -125,6 +126,20 @@ def render(state, size=DEFAULT_SIZE):
     return img
 
 
+# Inks on Waveshare colour panels: "e" = Spectra 6 (e.g. epd7in3e), "f" = 7-colour (adds orange)
+SPECTRA6 = [(0, 0, 0), (255, 255, 255), (255, 255, 0), (255, 0, 0), (0, 0, 255), (0, 255, 0)]
+SEVEN_COLOR = SPECTRA6 + [(255, 128, 0)]
+
+
+def snap_to_palette(img, colors):
+    """Map every pixel to the nearest ink with no dithering, so solid shapes and
+    anti-aliased text stay crisp instead of turning into speckles."""
+    pal = Image.new("P", (1, 1))
+    flat = [c for rgb in colors for c in rgb]
+    pal.putpalette(flat + flat[:3] * (256 - len(colors)))
+    return img.convert("RGB").quantize(palette=pal, dither=Image.Dither.NONE).convert("RGB")
+
+
 class _Waveshare:
     """Waveshare e-paper via the official waveshare_epd library."""
 
@@ -136,12 +151,15 @@ class _Waveshare:
         self.size = (h, w) if self.rotate else (w, h)
         # 7-colour / 6-colour panels end in "f" or "e" (epd7in3f, epd7in3e); the rest are black/white
         self.color = model.endswith(("f", "e")) if color is None else color
+        self.palette = SEVEN_COLOR if model.endswith("f") else SPECTRA6
         self.name = f"Waveshare {model}"
 
     def show(self, img):
         if self.rotate:
             img = img.rotate(90, expand=True)
-        if not self.color:
+        if self.color:
+            img = snap_to_palette(img, self.palette)
+        else:
             # Threshold instead of dithering, so coloured parts become solid black
             img = img.convert("L").point(lambda p: 0 if p < 160 else 255, mode="1")
         self.epd.init()

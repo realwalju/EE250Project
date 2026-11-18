@@ -78,7 +78,7 @@ ls ~/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd   # driver names
 ```
 
 Start the hub with your panel's driver name, e.g.
-`python hub.py --eink-model epd7in5_V2` (or set `EINK_MODEL` in `pi/.env`).
+`python hub.py --eink-model epd7in3e` for the 7.3" Spectra 6 panel (or set `EINK_MODEL` in `pi/.env`).
 InkyPi's config records the model: `grep -r display_type ~/InkyPi/src/config/`.
 Black/white panels are thresholded to pure black; 7-colour panels (names ending
 in `f` or `e`) get colour. Force either with `--eink-color mono|color`. Without
