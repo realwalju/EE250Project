@@ -1,1 +1,6 @@
 paho-mqtt>=2.0
+flask
+pillow
+anthropic
+# Pimoroni e-ink driver (Pi only, needs SPI/I2C enabled):
+inky[rpi]

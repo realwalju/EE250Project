@@ -21,6 +21,9 @@ esp32/
   mood_light/     ESP32-S3 using its built-in RGB LED for live game effects
 pi/
   hub.py          Central hub: MQTT logic, match state, tilt detection, SQLite log
+  companion.py    Companion mood, quick reactions, LLM post-match recaps
+  eink.py         Draws the companion screen for the Inky e-ink display
+  web.py          Flask dashboard (/) and OBS overlay (/overlay)
   mosquitto.conf  MQTT broker config for the Pi
 pc/
   test_publisher.py  Sends fake game events so everything can be tested without Fortnite
@@ -56,8 +59,18 @@ sudo systemctl restart mosquitto
 cd pi
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env      # optional: add an Anthropic API key for LLM recaps
 python hub.py --broker localhost
 ```
+
+Turn on SPI and I2C for the e-ink display (`sudo raspi-config` -> Interface
+Options). If the old InkyPi software is installed, stop it so it doesn't fight
+for the display: `sudo systemctl disable --now inkypi`. Without a display
+(or with `--no-eink`) the hub saves `pi/eink_preview.png` instead.
+
+The hub also serves:
+- **Dashboard:** `http://<PI_IP>:5000/` (open on the laptop)
+- **OBS overlay:** `http://<PI_IP>:5000/overlay` (add as a Browser Source, 1920x1080)
 
 ### 2. ESP32-S3 boards (Arduino IDE)
 
@@ -86,7 +99,8 @@ Watch everything with `mosquitto_sub -h <PI_IP> -t 'desk/#' -v`.
 
 - **Python:** paho-mqtt, mss, opencv-python, numpy
 - **ESP32:** Arduino-ESP32 core 3.x, PubSubClient, OneButton
-- **Pi:** Mosquitto MQTT broker, SQLite (Python standard library)
+- **Pi:** Mosquitto MQTT broker, SQLite (Python standard library), Flask, Pillow,
+  Pimoroni `inky`, Anthropic Python SDK
 
 ## AI tool use
 

@@ -2,9 +2,8 @@
 
 Subscribes to every device over MQTT, tracks match state, detects tilt by
 combining game events with desk vibration, tells the mood light which effect
-to play, and logs everything to SQLite.
-
-Still to come: LLM recaps, e-ink companion, Flask dashboard, OBS overlay.
+to play, logs everything to SQLite, drives the e-ink companion, and serves the
+web dashboard and OBS overlay (see web.py).
 
 AI-assisted: initial version generated with Claude (Anthropic), then reviewed
 and tested by the team.
@@ -13,10 +12,13 @@ and tested by the team.
 import argparse
 import json
 import sqlite3
+import threading
 import time
 from collections import deque
 
 import paho.mqtt.client as mqtt
+
+from companion import Companion
 
 # ---------- MQTT topics ----------
 T_GAME = "desk/game/event"
@@ -117,15 +119,20 @@ class MatchState:
 
 
 class Hub:
-    def __init__(self, publish, db_path="desk.db"):
+    def __init__(self, publish, db_path="desk.db", display=None):
         self.publish = publish  # publish(topic, dict) - injected so logic is testable
+        self.display = display  # EinkDisplay or None
+        self.lock = threading.RLock()  # MQTT, Flask and recap threads all touch hub state
         self.match = MatchState()
         self.tilt = TiltDetector()
         self.study_mode = False
         self.latest_sensors = {}
         self.latest_activity = {}
+        self.feed = deque(maxlen=500)  # recent events for the dashboard/overlay
+        self.feed_id = 0
         self.db = sqlite3.connect(db_path, check_same_thread=False)
         self._init_db()
+        self.companion = Companion(on_update=self._companion_changed)
 
     def _init_db(self):
         self.db.executescript(
@@ -137,9 +144,57 @@ class Hub:
         )
         self.db.commit()
 
+    # ---------- feed for web pages ----------
+    def add_feed(self, kind, data):
+        with self.lock:
+            self.feed_id += 1
+            self.feed.append({"id": self.feed_id, "ts": time.time(), "kind": kind, "data": data})
+
+    def feed_since(self, since):
+        with self.lock:
+            events = [e for e in self.feed if e["id"] > since][-50:]
+            return {"last_id": self.feed_id, "events": events}
+
+    def web_state(self):
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT summary FROM matches ORDER BY ts DESC LIMIT 10").fetchall()
+            matches = [json.loads(r[0]) for r in rows]
+            for m in matches:
+                m.pop("timeline", None)
+            return {
+                "in_match": self.match.in_match,
+                "study_mode": self.study_mode,
+                "match": ({k: self.match.stats[k] for k in ("match_id", "elims", "knocks")}
+                          if self.match.in_match else None),
+                "sensors": self.latest_sensors,
+                "vib_recent": self.tilt.vib_total(time.time()),
+                "companion": self.companion.snapshot(),
+                "matches": matches,
+                "last_id": self.feed_id,
+            }
+
+    def eink_state(self):
+        with self.lock:
+            state = self.companion.snapshot()
+            state.update(sensors=dict(self.latest_sensors), study_mode=self.study_mode,
+                         in_match=self.match.in_match)
+            return state
+
+    def refresh_eink(self, force=False):
+        if self.display:
+            self.display.request(self.eink_state(), force=force)
+
+    def _companion_changed(self):
+        snap = self.companion.snapshot()
+        self.add_feed("companion", {"mood": snap["mood"], "message": snap["message"]})
+        print(f"  companion ({snap['mood']}): {snap['message']}")
+        self.refresh_eink(force=True)
+
     # ---------- outputs ----------
     def effect(self, name):
         self.publish(T_EFFECT, {"effect": name})
+        self.add_feed("effect", {"effect": name})
         print(f"  -> light: {name}")
 
     def base_effect(self):
@@ -150,21 +205,22 @@ class Hub:
     # ---------- inputs ----------
     def handle(self, topic, data, now=None):
         now = time.time() if now is None else now
-        self.db.execute("INSERT INTO events VALUES (?, ?, ?)", (now, topic, json.dumps(data)))
-        self.db.commit()
-
-        if topic == T_GAME:
-            self.on_game(data, now)
-        elif topic == T_SENSORS:
-            self.on_sensors(data, now)
-        elif topic == T_BUTTON:
-            self.on_button(data, now)
-        elif topic == T_ACTIVITY:
-            self.latest_activity = data
+        with self.lock:
+            self.db.execute("INSERT INTO events VALUES (?, ?, ?)", (now, topic, json.dumps(data)))
+            self.db.commit()
+            if topic == T_GAME:
+                self.on_game(data, now)
+            elif topic == T_SENSORS:
+                self.on_sensors(data, now)
+            elif topic == T_BUTTON:
+                self.on_button(data, now)
+            elif topic == T_ACTIVITY:
+                self.latest_activity = data
 
     def on_game(self, data, now):
         etype = data.get("type")
         print(f"game: {etype}")
+        self.add_feed("game", data)
         was_in_match = self.match.in_match
         summary = self.match.on_event(etype, now)
 
@@ -182,26 +238,31 @@ class Hub:
         self.latest_sensors = data
         if self.tilt.on_vibration(int(data.get("vib") or 0), now):
             self.on_tilt()
+        if not self.match.in_match:
+            self.companion.check_late_night(data.get("light_pct"))
 
     def on_button(self, data, now):
         button_id = data.get("id")
         print(f"button: {button_id}")
+        self.add_feed("button", data)
         if button_id == "clip":
             self.db.execute("INSERT INTO clips VALUES (?, ?)", (now, self.match.match_id))
             self.db.commit()
             print("  clip saved")
         elif button_id == "interact":
-            self.publish(T_NOTIFY, {"msg": 0})
-            # TODO: show the companion's latest message / recap on the e-ink
+            self.publish(T_NOTIFY, {"msg": 0})  # stop the LED's "new message" blink
+            self.refresh_eink(force=True)
         elif button_id == "mode":
             self.study_mode = not self.study_mode
             print(f"  study mode {'on' if self.study_mode else 'off'}")
             self.effect(self.base_effect())
+            if self.study_mode:
+                self.companion.react("study")
 
     def on_tilt(self):
         print("TILT detected (bad event + desk slams)")
         self.effect("tilt")
-        # TODO: companion reacts on e-ink / overlay
+        self.companion.react("tilt")
 
     def on_match_end(self, summary, now):
         print(f"match {summary['match_id']} ended: {summary['result']}, "
@@ -210,8 +271,8 @@ class Hub:
                         (now, summary["match_id"], json.dumps(summary)))
         self.db.commit()
         self.effect(self.base_effect())  # mood light returns here after the one-shot effect
-        self.publish(T_NOTIFY, {"msg": 1})
-        # TODO: send summary to the LLM for a recap and draw it on the e-ink
+        self.publish(T_NOTIFY, {"msg": 1})  # sensor board LED double-blinks
+        self.companion.on_match_end(summary)  # quick reaction now, LLM recap in background
 
 
 def main():
@@ -219,6 +280,8 @@ def main():
     parser.add_argument("--broker", default="localhost")
     parser.add_argument("--port", type=int, default=1883)
     parser.add_argument("--db", default="desk.db")
+    parser.add_argument("--web-port", type=int, default=5000)
+    parser.add_argument("--no-eink", action="store_true", help="don't drive the e-ink display")
     args = parser.parse_args()
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="desk-hub")
@@ -226,7 +289,26 @@ def main():
     def publish(topic, payload):
         client.publish(topic, json.dumps(payload))
 
-    hub = Hub(publish, args.db)
+    display = None
+    if not args.no_eink:
+        from eink import EinkDisplay
+        display = EinkDisplay(min_interval=60)
+    hub = Hub(publish, args.db, display=display)
+
+    # Web dashboard + OBS overlay in a background thread
+    from web import create_app
+    app = create_app(hub)
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=args.web_port, threaded=True),
+                     daemon=True).start()
+    print(f"dashboard: http://<this Pi's IP>:{args.web_port}/   overlay: /overlay")
+
+    # Refresh the e-ink every 10 minutes so the clock and stats stay current
+    def eink_timer():
+        while True:
+            hub.refresh_eink(force=True)
+            time.sleep(600)
+    if display:
+        threading.Thread(target=eink_timer, daemon=True).start()
 
     def on_connect(client, userdata, flags, reason_code, properties):
         print(f"connected to {args.broker} ({reason_code})")
