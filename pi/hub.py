@@ -18,7 +18,7 @@ from collections import deque
 
 import paho.mqtt.client as mqtt
 
-from companion import Companion
+from companion import Companion, load_env
 
 # ---------- MQTT topics ----------
 T_GAME = "desk/game/event"
@@ -285,7 +285,11 @@ def main():
     parser.add_argument("--db", default="desk.db")
     parser.add_argument("--web-port", type=int, default=5000)
     parser.add_argument("--no-eink", action="store_true", help="don't drive the e-ink display")
+    parser.add_argument("--eink-model", help="Waveshare driver name, e.g. epd7in5_V2 (omit for Pimoroni Inky)")
+    parser.add_argument("--eink-color", choices=["auto", "mono", "color"], default="auto",
+                        help="force black/white or colour output for a Waveshare panel")
     args = parser.parse_args()
+    load_env()  # pi/.env: API key, EINK_MODEL
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="desk-hub")
 
@@ -295,7 +299,8 @@ def main():
     display = None
     if not args.no_eink:
         from eink import EinkDisplay
-        display = EinkDisplay(min_interval=60)
+        color = {"auto": None, "mono": False, "color": True}[args.eink_color]
+        display = EinkDisplay(min_interval=60, model=args.eink_model, color=color)
     hub = Hub(publish, args.db, display=display)
 
     # Web dashboard in a background thread

@@ -66,10 +66,24 @@ cp .env.example .env      # optional: add an Anthropic API key for LLM recaps
 python hub.py --broker localhost
 ```
 
-Turn on SPI and I2C for the e-ink display (`sudo raspi-config` -> Interface
-Options). If the old InkyPi software is installed, stop it so it doesn't fight
-for the display: `sudo systemctl disable --now inkypi`. Without a display
-(or with `--no-eink`) the hub saves `pi/eink_preview.png` instead.
+**E-ink display (Waveshare).** Turn on SPI (`sudo raspi-config` -> Interface
+Options -> SPI). If the old InkyPi software is installed, stop it so it doesn't
+fight for the display: `sudo systemctl disable --now inkypi`. Then install
+Waveshare's driver into the venv:
+
+```bash
+git clone --depth 1 https://github.com/waveshareteam/e-Paper ~/e-Paper
+pip install ~/e-Paper/RaspberryPi_JetsonNano/python
+ls ~/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd   # driver names
+```
+
+Start the hub with your panel's driver name, e.g.
+`python hub.py --eink-model epd7in5_V2` (or set `EINK_MODEL` in `pi/.env`).
+InkyPi's config records the model: `grep -r display_type ~/InkyPi/src/config/`.
+Black/white panels are thresholded to pure black; 7-colour panels (names ending
+in `f` or `e`) get colour. Force either with `--eink-color mono|color`. Without
+a display (or with `--no-eink`) the hub saves `pi/eink_preview.png` instead. A
+Pimoroni Inky is detected automatically when no model is given.
 
 The hub also serves the dashboard at `http://<PI_IP>:5000/` (open it on the laptop).
 
@@ -110,7 +124,7 @@ Watch everything with `mosquitto_sub -h <PI_IP> -t 'desk/#' -v`.
 - **Python:** paho-mqtt, mss, opencv-python, numpy
 - **ESP32:** Arduino-ESP32 core 3.x, PubSubClient, OneButton
 - **Pi:** Mosquitto MQTT broker, SQLite (Python standard library), Flask, Pillow,
-  Pimoroni `inky`, Anthropic Python SDK
+  Waveshare `waveshare_epd` (or Pimoroni `inky`), gpiozero, lgpio, spidev, Anthropic Python SDK
 
 ## AI tool use
 

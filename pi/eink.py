@@ -1,11 +1,15 @@
-"""Draws the companion screen and sends it to the Pimoroni Inky e-ink display.
+"""Draws the companion screen and sends it to the e-ink display.
+
+Supports Waveshare e-paper displays (pass the driver name, e.g. epd7in5_V2,
+with --eink-model or the EINK_MODEL environment variable) and Pimoroni Inky
+displays (detected automatically).
 
 Layout: the companion's face on the left, its current message on the right,
 session stats and room info along the bottom.
 
 E-ink takes many seconds to refresh and flashes while it does, so refreshes
 run in a background thread and are rate-limited (min_interval). Without an
-Inky display attached (e.g. on a laptop), it saves eink_preview.png instead,
+display attached (e.g. on a laptop), it saves eink_preview.png instead,
 so the layout can be checked anywhere.
 
 AI-assisted: initial version generated with Claude (Anthropic), then reviewed
@@ -21,7 +25,7 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 
 PREVIEW_PATH = os.path.join(os.path.dirname(__file__), "eink_preview.png")
-DEFAULT_SIZE = (800, 480)  # Inky Impression 7.3"; real size is read from the display
+DEFAULT_SIZE = (800, 480)  # used for the preview; the real size is read from the display
 
 BLACK, WHITE = (0, 0, 0), (255, 255, 255)
 ACCENT = {"happy": (0, 140, 0), "smug": (220, 120, 0), "worried": (200, 0, 0),
@@ -121,23 +125,65 @@ def render(state, size=DEFAULT_SIZE):
     return img
 
 
+class _Waveshare:
+    """Waveshare e-paper via the official waveshare_epd library."""
+
+    def __init__(self, model, color=None):
+        import importlib
+        self.epd = importlib.import_module(f"waveshare_epd.{model}").EPD()
+        w, h = self.epd.width, self.epd.height
+        self.rotate = h > w  # some panels are natively portrait: draw landscape, then rotate
+        self.size = (h, w) if self.rotate else (w, h)
+        # 7-colour / 6-colour panels end in "f" or "e" (epd7in3f, epd7in3e); the rest are black/white
+        self.color = model.endswith(("f", "e")) if color is None else color
+        self.name = f"Waveshare {model}"
+
+    def show(self, img):
+        if self.rotate:
+            img = img.rotate(90, expand=True)
+        if not self.color:
+            # Threshold instead of dithering, so coloured parts become solid black
+            img = img.convert("L").point(lambda p: 0 if p < 160 else 255, mode="1")
+        self.epd.init()
+        buf = self.epd.getbuffer(img)
+        try:
+            self.epd.display(buf)
+        except TypeError:  # 3-colour (b/c) panels take a black and a red buffer
+            self.epd.display(buf, self.epd.getbuffer(Image.new("1", img.size, 255)))
+        self.epd.sleep()  # low-power mode between refreshes; protects the panel
+
+
+class _Inky:
+    """Pimoroni Inky, detected from the board's EEPROM."""
+
+    def __init__(self):
+        from inky.auto import auto
+        self.inky = auto()
+        self.size = self.inky.resolution
+        self.name = type(self.inky).__name__
+
+    def show(self, img):
+        self.inky.set_image(img)
+        self.inky.show()
+
+
 class EinkDisplay:
-    def __init__(self, min_interval=60.0):
+    def __init__(self, min_interval=60.0, model=None, color=None):
         self.min_interval = min_interval
         self.last_refresh = 0.0
         self.pending = None
         self.pending_force = False
         self.busy = False
         self.lock = threading.Lock()
+        model = model or os.environ.get("EINK_MODEL")
         try:
-            from inky.auto import auto  # only available on the Pi with the display attached
-            self.inky = auto()
-            self.size = self.inky.resolution
-            print(f"e-ink: found {type(self.inky).__name__} {self.size}")
+            self.backend = _Waveshare(model, color) if model else _Inky()
+            self.size = self.backend.size
+            print(f"e-ink: using {self.backend.name} {self.size}")
         except Exception as e:
-            self.inky = None
+            self.backend = None
             self.size = DEFAULT_SIZE
-            print(f"e-ink: no display ({e.__class__.__name__}), saving {PREVIEW_PATH}")
+            print(f"e-ink: no display ({e.__class__.__name__}: {e}), saving {PREVIEW_PATH}")
 
     def request(self, state, force=False):
         """Queue a refresh. Skipped if one happened recently, unless force=True."""
@@ -164,9 +210,8 @@ class EinkDisplay:
             first = False
             img = render(state, self.size)
             try:
-                if self.inky:
-                    self.inky.set_image(img)
-                    self.inky.show()
+                if self.backend:
+                    self.backend.show(img)
                 else:
                     img.save(PREVIEW_PATH)
             except Exception as e:
