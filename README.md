@@ -1,6 +1,6 @@
 # Fortnite Desk Companion (EE250 Final Project)
 
-**Team:** [Name 1], [Name 2]
+**Team:** Walton, Andrea
 
 A desk system that reacts to Fortnite games in real time. The gaming PC detects
 game events from the screen with computer vision, a Raspberry Pi 5 hub turns them
