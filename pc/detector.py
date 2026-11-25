@@ -51,6 +51,7 @@ EVENTS = ["match_start", "elim", "knocked", "eliminated", "victory"]
 # false matches.
 CENTER = (0.15, 0.05, 0.70, 0.85)
 SEARCH_REGIONS = {event: CENTER for event in EVENTS}
+SEARCH_REGIONS["elim"] = (0.15, 0.05, 0.85, 0.85)  # "+300 ENEMY ELIMINATED" pops up at the right edge
 
 # Similarity needed to count as "seen" (0-1). Tune with --test / --debug.
 THRESHOLDS = {event: 0.80 for event in EVENTS}
@@ -203,7 +204,7 @@ def run_live(args, templates):
         if client:
             client.publish(topic, json.dumps(payload))
 
-    confirm = ConfirmFilter(frames=3, cooldown=3.0)
+    confirm = ConfirmFilter(frames=2, cooldown=3.0)
     if args.save_every:
         os.makedirs(args.save_dir, exist_ok=True)
     last_save = last_activity = last_debug = 0.0
