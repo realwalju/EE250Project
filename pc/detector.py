@@ -10,11 +10,12 @@ How detection works:
   1. pc/templates/<event>/*.png hold small cropped images of the on-screen
      message for each event (e.g. the "VICTORY ROYALE" text). Make them from
      your own screenshots, see pc/templates/README.md.
-  2. Each frame is converted to grayscale and shrunk to half size (faster),
-     then cv2.matchTemplate slides each template over the event's search
+  2. Each frame is converted to grayscale and resized to a fixed height
+     (WORK_HEIGHT), so any screen resolution looks the same to the matcher
+     (Fortnite's HUD scales with screen height). Then cv2.matchTemplate slides each template over the event's search
      region at a few scales and returns a 0-1 similarity score.
   3. A score above the event's threshold counts as "seen". ConfirmFilter only
-     reports an event after 3 consecutive frames, and a banner that stays up
+     reports an event after 2 consecutive frames, and a banner that stays up
      for several seconds counts once.
 
 Usage:
@@ -22,6 +23,8 @@ Usage:
   python detector.py --broker <PI_IP> --debug          # also print scores
   python detector.py --save-every 2                    # save a screenshot every 2 s
   python detector.py --test recordings                 # score saved screenshots offline
+  python detector.py --crop shot.png 100 200 400 250 --event elim --name banner
+                                                       # save a template (any resolution)
 
 AI-assisted: initial version generated with Claude (Anthropic), then reviewed
 and tested by the team.
@@ -55,15 +58,57 @@ SEARCH_REGIONS["elim"] = (0.15, 0.05, 0.85, 0.85)  # "+300 ENEMY ELIMINATED" pop
 
 # Similarity needed to count as "seen" (0-1). Tune with --test / --debug.
 THRESHOLDS = {event: 0.80 for event in EVENTS}
+# Real kills score 0.91+, busy non-kill scenes reach ~0.75 on the elim templates
+THRESHOLDS["elim"] = 0.84
 
-WORK_SCALE = 0.5            # process frames at half resolution
+# Resolution independence: templates are stored as if the screen were
+# TEMPLATE_HEIGHT pixels tall, and every frame is resized to WORK_HEIGHT tall
+# before matching. So screenshots and templates from a 1920x1080 PC and a
+# 2880x1800 laptop work together. Use --crop to save templates; it rescales.
+TEMPLATE_HEIGHT = 1080
+WORK_HEIGHT = 900           # matching resolution; lower = faster, less precise
 SCALES = (0.9, 1.0, 1.1)    # also try templates slightly smaller/larger
 
 
 # ---------- image helpers ----------
-def prep(img_bgr):
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
-    return cv2.resize(gray, None, fx=WORK_SCALE, fy=WORK_SCALE, interpolation=cv2.INTER_AREA)
+def _gray(img_bgr):
+    return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
+
+
+def _resize(gray, scale):
+    if scale == 1.0:
+        return gray
+    interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
+    return cv2.resize(gray, None, fx=scale, fy=scale, interpolation=interp)
+
+
+def prep_frame(frame_bgr):
+    """Full screenshot -> grayscale, WORK_HEIGHT pixels tall."""
+    return _resize(_gray(frame_bgr), WORK_HEIGHT / frame_bgr.shape[0])
+
+
+def prep_template(img_bgr):
+    """Template stored at TEMPLATE_HEIGHT scale -> same scale as prep_frame output."""
+    return _resize(_gray(img_bgr), WORK_HEIGHT / TEMPLATE_HEIGHT)
+
+
+def save_template(frame_path, box, event, name, folder=None):
+    """Crops box=(x0, y0, x1, y1) in the screenshot's own pixels and saves it,
+    rescaled to TEMPLATE_HEIGHT, as templates/<event>/<name>.png."""
+    frame = cv2.imread(frame_path)
+    if frame is None:
+        raise SystemExit(f"can't read {frame_path}")
+    x0, y0, x1, y1 = box
+    crop = frame[y0:y1, x0:x1]
+    scale = TEMPLATE_HEIGHT / frame.shape[0]
+    if scale != 1.0:
+        crop = cv2.resize(crop, None, fx=scale, fy=scale,
+                          interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC)
+    out_dir = os.path.join(folder or TEMPLATE_DIR, event)
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, name if name.endswith(".png") else name + ".png")
+    cv2.imwrite(out, crop)
+    return out
 
 
 def crop_frac(img, region):
@@ -74,14 +119,14 @@ def crop_frac(img, region):
 
 
 def load_templates(folder=TEMPLATE_DIR):
-    """Returns {event: [grayscale template at WORK_SCALE, ...]} for events that have templates."""
+    """Returns {event: [grayscale template at matching scale, ...]} for events that have templates."""
     templates = {}
     for event in EVENTS:
         imgs = []
         for path in sorted(glob.glob(os.path.join(folder, event, "*.png"))):
             img = cv2.imread(path)
             if img is not None:
-                imgs.append(prep(img))
+                imgs.append(prep_template(img))
         if imgs:
             templates[event] = imgs
     return templates
@@ -102,7 +147,7 @@ def best_score(region_gray, template):
 
 def detect(frame_bgr, templates):
     """Returns {event: best similarity score} for every event with templates."""
-    gray = prep(frame_bgr)
+    gray = prep_frame(frame_bgr)
     scores = {}
     for event, tmpls in templates.items():
         region = crop_frac(gray, SEARCH_REGIONS[event])
@@ -249,7 +294,18 @@ def main():
                         help="save a full screenshot every N seconds (for making templates)")
     parser.add_argument("--save-dir", default=os.path.join(HERE, "recordings"))
     parser.add_argument("--test", metavar="PATH", help="score a saved screenshot or a folder of them")
+    parser.add_argument("--crop", nargs=5, metavar=("SHOT", "X0", "Y0", "X1", "Y1"),
+                        help="save a template: box in the screenshot's own pixels (needs --event, --name)")
+    parser.add_argument("--event", choices=EVENTS, help="template folder for --crop")
+    parser.add_argument("--name", help="template file name for --crop")
     args = parser.parse_args()
+
+    if args.crop:
+        if not (args.event and args.name):
+            parser.error("--crop needs --event and --name")
+        shot, *box = args.crop
+        print("saved", save_template(shot, tuple(int(v) for v in box), args.event, args.name))
+        return
 
     templates = load_templates()
     if not templates:

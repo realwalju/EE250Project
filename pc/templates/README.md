@@ -18,13 +18,25 @@ Events without templates are simply skipped.
 
 1. Run `python detector.py --save-every 2` and play a couple of matches. It saves a
    full screenshot every 2 seconds to `pc/recordings/` (gitignored).
-2. Find screenshots that show each message. Open one in Paint (or any editor) and
-   crop tightly around the **text only**. Avoid background scenery, because it
-   changes every time. Save it as a `.png` in the event's folder.
+2. Find screenshots that show each message and note a tight box around the
+   **text only** (Paint shows pixel coordinates at the bottom). Avoid background
+   scenery, because it changes every time. Save it with:
+
+   ```
+   python detector.py --crop recordings/frame_123.png X0 Y0 X1 Y1 --event elim --name my_banner
+   ```
+
+   `--crop` takes the box in the screenshot's own pixels and rescales the crop to
+   the 1080p reference size, so screenshots from any resolution work.
 3. Check it with `python detector.py --test pc/recordings`. Each screenshot gets a
    0-1 score per event. Screenshots with the message should score high (0.8+),
    others low (under 0.5). Adjust `THRESHOLDS` in `detector.py` if needed.
 4. Add a second crop of the same message from another match if one template
    misses sometimes.
 
-Templates must come from the same screen resolution and HUD scale you play at.
+All templates are stored at a 1080p reference size and every frame is resized to
+the same height before matching, so templates made on a 1920x1080 PC work on a
+2880x1800 laptop and the other way around (Fortnite's HUD scales with screen
+height). If you crop by hand in an editor instead of `--crop`, resize the crop by
+1080 / (your screenshot's height) before saving. Changing the in-game HUD scale
+still needs new templates.

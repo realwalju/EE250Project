@@ -319,3 +319,21 @@ def test_template_matching_on_synthetic_frames(tmp_path):
         assert win["victory"] >= d.THRESHOLDS["victory"] > win["knocked"]
         assert knock["knocked"] >= d.THRESHOLDS["knocked"] > knock["victory"]
         assert max(other.values()) < 0.8
+
+
+def test_detection_is_resolution_independent(tmp_path):
+    """A template cropped from a 1920x1080 screenshot still matches the same HUD
+    text on a 2880x1800 screen (and vice versa), because frames and templates
+    are normalised by height."""
+    import detector as d
+    white = (255, 255, 255)
+    small = _put(_scene(7), "ELIMINATED", 600, white)                 # 1920x1080 screen
+    shot = tmp_path / "small.png"
+    cv2.imwrite(str(shot), small)
+    (w, h), b = cv2.getTextSize("ELIMINATED", cv2.FONT_HERSHEY_DUPLEX, 3.2, 7)
+    d.save_template(str(shot), (552, 600 - h - 8, 568 + w, 600 + b + 8), "elim", "t", folder=str(tmp_path))
+    templates = d.load_templates(str(tmp_path))
+
+    big = cv2.resize(_put(_scene(8), "ELIMINATED", 600, white), (3200, 1800))  # same HUD, bigger screen
+    assert d.detect(big, templates)["elim"] >= d.THRESHOLDS["elim"]
+    assert d.detect(cv2.resize(_scene(9), (3200, 1800)), templates)["elim"] < 0.6
