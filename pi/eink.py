@@ -219,6 +219,18 @@ def _draw_message(d, message):
         d.text((384, 176 + index * line_height), line, font=font, fill=BLACK, anchor="lt")
 
 
+def face_png(mood, size=240):
+    """Just the robot, as PNG bytes, for the web dashboard."""
+    import io
+    if mood not in MOODS:
+        mood = "neutral"
+    img = Image.new("RGB", (size, size), WHITE)
+    draw_face(ImageDraw.Draw(img), size / 2, size * 0.56, size * 0.40, mood)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
 def render(state, size=DEFAULT_SIZE):
     """state: {"mood", "message", "session": {...}, "sensors": {...}, "study_mode"}"""
     # Compose at the panel's native size, then fit other panels without clipping

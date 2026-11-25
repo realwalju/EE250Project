@@ -7,7 +7,9 @@ AI-assisted: initial version generated with Claude (Anthropic), then reviewed
 and tested by the team.
 """
 
-from flask import Flask, jsonify, request
+from functools import lru_cache
+
+from flask import Flask, Response, jsonify, request
 
 
 def create_app(hub):
@@ -21,6 +23,17 @@ def create_app(hub):
     def events():
         since = request.args.get("since", default=0, type=int)
         return jsonify(hub.feed_since(since))
+
+    @lru_cache(maxsize=32)
+    def face_bytes(mood):
+        from eink import face_png  # imported here so the dashboard works without Pillow
+        return face_png(mood)
+
+    @app.get("/api/face/<mood>.png")
+    def face(mood):
+        # Same robot drawing as the e-ink screen
+        return Response(face_bytes(mood), mimetype="image/png",
+                        headers={"Cache-Control": "max-age=3600"})
 
     @app.get("/")
     def dashboard():
@@ -37,6 +50,8 @@ DASHBOARD_HTML = """<!doctype html>
   header { padding: 16px 24px; border-bottom: 1px solid #2a2f36; display: flex; justify-content: space-between; }
   h1 { font-size: 20px; margin: 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 24px; }
+  .face-row { display: flex; align-items: center; gap: 16px; }
+  .face { width: 120px; height: 120px; background: #fff; border-radius: 12px; padding: 6px; }
   .card { background: #1a1f25; border: 1px solid #2a2f36; border-radius: 12px; padding: 16px; }
   .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #8a94a3; margin: 0 0 12px; }
   .big { font-size: 28px; font-weight: 600; }
@@ -59,7 +74,10 @@ DASHBOARD_HTML = """<!doctype html>
     <div class="row"><span class="muted">PC app</span><span id="app">-</span></div>
   </div>
   <div class="card"><h2>Companion</h2>
-    <div class="big" id="mood">-</div>
+    <div class="face-row">
+      <img id="face" class="face" src="/api/face/neutral.png" alt="companion face">
+      <div class="big" id="mood">-</div>
+    </div>
     <p id="message" style="font-size:18px"></p>
     <p class="muted" id="recap"></p>
   </div>
@@ -88,6 +106,8 @@ async function poll() {
     const a = s.activity || {};
     $('app').textContent = a.app ? (a.gaming ? 'Fortnite' : a.app.slice(0, 30)) : '-';
     $('mood').textContent = s.companion.mood;
+    const faceSrc = `/api/face/${encodeURIComponent(s.companion.mood)}.png`;
+    if ($('face').getAttribute('src') !== faceSrc) $('face').setAttribute('src', faceSrc);
     $('message').textContent = s.companion.message;
     $('recap').textContent = s.companion.last_recap ? 'Last recap: ' + s.companion.last_recap.text : '';
     const r = s.sensors || {};
