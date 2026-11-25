@@ -26,6 +26,7 @@ pi/
   preview_eink.py  Previews robot expressions and full screens, without hardware
   web.py          Flask dashboard
   mosquitto.conf  MQTT broker config for the Pi
+  install_service.sh  Runs the hub on boot (systemd)
 pc/
   test_publisher.py  Sends fake game events so everything can be tested without Fortnite
   detector.py        Screen-capture event detector (template matching) + PC activity
@@ -67,6 +68,18 @@ pip install -r requirements.txt
 cp .env.example .env      # optional: add an Anthropic API key for LLM recaps
 python hub.py --broker localhost
 ```
+
+**Start on boot (for the demo).** Once `python hub.py` works by hand, install it
+as a service so the Pi runs the hub whenever it's powered on:
+
+```bash
+bash install_service.sh            # run from the pi/ folder
+journalctl -u desk-hub -f          # live log
+sudo systemctl restart desk-hub    # after a git pull
+```
+
+Stop it (`sudo systemctl stop desk-hub`) before running `hub.py` by hand, or the
+two will fight over the e-ink display and port 5000.
 
 **E-ink display (Waveshare).** Turn on SPI (`sudo raspi-config` -> Interface
 Options -> SPI). If the old InkyPi software is installed, stop it so it doesn't
