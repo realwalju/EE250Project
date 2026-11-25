@@ -34,8 +34,8 @@ DEMO_SCRIPT = [
     (3, T_GAME, {"type": "elim"}),
     (3, T_GAME, {"type": "elim"}),
     (3, T_GAME, {"type": "knocked"}),
-    (1, T_SENSORS, {"light_pct": 40, "temp_c": 24.0, "vib": 4}),  # fake desk slams
-    (1, T_SENSORS, {"light_pct": 40, "temp_c": 24.0, "vib": 5}),  # -> tilt
+    (1, T_SENSORS, {"temp_c": 24.0, "vib": 4}),  # fake desk slams
+    (1, T_SENSORS, {"temp_c": 24.0, "vib": 5}),  # -> tilt
     (5, T_GAME, {"type": "elim"}),
     (3, T_GAME, {"type": "victory"}),
 ]
@@ -56,7 +56,7 @@ def interactive(client):
         if key in KEYS:
             send(client, T_GAME, {"type": KEYS[key]})
         elif key == "t":
-            send(client, T_SENSORS, {"light_pct": 40, "temp_c": 24.0, "vib": 8})
+            send(client, T_SENSORS, {"temp_c": 24.0, "vib": 8})
         else:
             print("unknown key")
 

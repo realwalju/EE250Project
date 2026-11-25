@@ -29,10 +29,16 @@ DEFAULT_MODEL = "epd7in3e"  # Waveshare 7.3" E Ink Spectra 6, 800x480
 DEFAULT_SIZE = (800, 480)  # used for the preview; the real size is read from the display
 
 BLACK, WHITE = (0, 0, 0), (255, 255, 255)
-# Pure colours that exist as inks on 6/7-colour e-paper
-ACCENT = {"happy": (0, 255, 0), "smug": (255, 0, 0), "worried": (255, 0, 0),
-          "sleepy": (0, 0, 255), "calm": (0, 0, 255), "neutral": BLACK}
+# Pure colours that exist as inks on 6/7-colour e-paper (Spectra 6: black,
+# white, yellow, red, blue, green). Anything else gets snapped to these.
+RED, BLUE, GREEN, YELLOW = (255, 0, 0), (0, 0, 255), (0, 255, 0), (255, 255, 0)
+FACE_FILL = YELLOW
 
+# Colour of the mood label (never yellow: unreadable on white)
+ACCENT = {"happy": GREEN, "hype": RED, "proud": GREEN, "starstruck": RED,
+          "smug": RED, "shocked": RED, "sad": BLUE, "worried": BLUE, "angry": RED,
+          "focused": BLUE, "sleepy": BLUE, "calm": BLUE, "neutral": BLACK}
+MOODS = list(ACCENT)
 
 def _font(size, bold=False):
     names = ["DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"]
@@ -46,44 +52,142 @@ def _font(size, bold=False):
     return ImageFont.load_default(size=size)
 
 
-def draw_face(d, cx, cy, r, mood, color):
-    """Simple shapes so it reads clearly on e-ink."""
-    d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=BLACK, width=6)
-    ex, ey, er = r * 0.38, cy - r * 0.2, r * 0.1  # eye offset, eye height, eye radius
-    mouth = [cx - r * 0.45, cy + r * 0.05, cx + r * 0.45, cy + r * 0.6]
+def _star(d, x, y, r, fill):
+    import math
+    pts = []
+    for i in range(10):
+        rr = r if i % 2 == 0 else r * 0.45
+        ang = -math.pi / 2 + i * math.pi / 5
+        pts.append((x + rr * math.cos(ang), y + rr * math.sin(ang)))
+    d.polygon(pts, fill=fill, outline=BLACK)
 
-    if mood in ("sleepy", "calm"):  # closed eyes
-        for sx in (-1, 1):
-            x = cx + sx * ex
-            d.arc([x - er * 1.5, ey - er, x + er * 1.5, ey + er * 1.5], 0, 180, fill=BLACK, width=5)
-    elif mood == "smug":  # half-lidded
-        for sx in (-1, 1):
-            x = cx + sx * ex
-            d.chord([x - er, ey - er, x + er, ey + er], 0, 180, fill=BLACK)
-            d.line([x - er * 1.4, ey, x + er * 1.4, ey], fill=BLACK, width=5)
-    else:
-        for sx in (-1, 1):
-            x = cx + sx * ex
-            d.ellipse([x - er, ey - er, x + er, ey + er], fill=BLACK)
 
-    if mood == "worried":  # slanted brows + frown
+def _drop(d, x, y, r, fill):
+    """Teardrop / sweat drop pointing up."""
+    d.ellipse([x - r, y, x + r, y + 2 * r], fill=fill, outline=BLACK, width=2)
+    d.polygon([(x - r * 0.85, y + r * 0.6), (x, y - r * 1.3), (x + r * 0.85, y + r * 0.6)], fill=fill)
+    d.line([(x - r * 0.85, y + r * 0.6), (x, y - r * 1.3), (x + r * 0.85, y + r * 0.6)], fill=BLACK, width=2)
+
+
+def draw_face(d, cx, cy, r, mood):
+    """The companion: a round face built from simple shapes so it reads clearly
+    on e-ink. Each mood changes the eyes, brows, mouth and extras."""
+    lw = max(3, int(r * 0.045))       # line width
+    ex, ey = r * 0.36, cy - r * 0.18  # eye x offset, eye height
+    er = r * 0.11                     # eye radius
+    my = cy + r * 0.35                # mouth height
+
+    # Extras behind the face
+    if mood == "proud":  # crown
+        cw, ch = r * 0.75, r * 0.45
+        top = cy - r * 0.92 - ch
+        pts = [(cx - cw, cy - r * 0.8), (cx - cw, top + ch * 0.25), (cx - cw * 0.5, top + ch * 0.6),
+               (cx, top), (cx + cw * 0.5, top + ch * 0.6), (cx + cw, top + ch * 0.25), (cx + cw, cy - r * 0.8)]
+        d.polygon(pts, fill=YELLOW, outline=BLACK, width=lw)
+        for px, py in pts[1:-1:2] + [pts[3]]:
+            d.ellipse([px - lw * 1.6, py - lw * 1.6, px + lw * 1.6, py + lw * 1.6], fill=RED, outline=BLACK)
+
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=FACE_FILL, outline=BLACK, width=lw + 2)
+
+    def eyes_dots(scale=1.0):
+        for sx in (-1, 1):
+            x, rr = cx + sx * ex, er * scale
+            d.ellipse([x - rr, ey - rr * 1.25, x + rr, ey + rr * 1.25], fill=BLACK)
+
+    def eyes_arcs(up=True):  # ^ ^ (happy) or closed u u (sleepy)
         for sx in (-1, 1):
             x = cx + sx * ex
-            d.line([x - sx * er * 1.8, ey - er * 2.6, x + sx * er * 1.4, ey - er * 1.6], fill=color, width=6)
-        d.arc([mouth[0], mouth[1] + r * 0.25, mouth[2], mouth[3] + r * 0.3], 200, 340, fill=color, width=6)
-    elif mood == "happy":
-        d.chord(mouth, 0, 180, fill=color)
+            box = [x - er * 1.6, ey - er * 1.2, x + er * 1.6, ey + er * 1.4]
+            d.arc(box, 180, 360, fill=BLACK, width=lw) if up else d.arc(box, 0, 180, fill=BLACK, width=lw)
+
+    def brows(inner_dy, outer_dy, color=BLACK):  # negative = higher
+        for sx in (-1, 1):
+            x = cx + sx * ex
+            inner = (x - sx * er * 1.6, ey - er * 2.4 + inner_dy * er)
+            outer = (x + sx * er * 1.6, ey - er * 2.4 + outer_dy * er)
+            d.line([inner, outer], fill=color, width=lw + 2)
+
+    def smile(width=0.5, depth=0.35, fill=None):
+        box = [cx - r * width, my - r * depth, cx + r * width, my + r * depth * 0.6]
+        if fill:
+            d.chord(box, 0, 180, fill=fill, outline=BLACK, width=lw)
+        else:
+            d.arc(box, 15, 165, fill=BLACK, width=lw)
+
+    def frown(width=0.4):
+        d.arc([cx - r * width, my, cx + r * width, my + r * 0.5], 200, 340, fill=BLACK, width=lw)
+
+    if mood == "happy":
+        eyes_dots(); smile(0.45, 0.3, fill=RED)
+    elif mood == "hype":
+        eyes_arcs(up=True); brows(-0.6, -0.6)
+        smile(0.55, 0.45, fill=RED)
+        d.line([cx - r * 0.42, my + r * 0.05, cx + r * 0.42, my + r * 0.05], fill=WHITE, width=lw * 2)
+        for sx in (-1, 1):  # motion lines
+            x = cx + sx * r * 1.12
+            for dy in (-0.35, 0, 0.35):
+                d.line([x, cy + dy * r, x + sx * r * 0.22, cy + dy * r * 1.2], fill=RED, width=lw)
+    elif mood == "proud":
+        eyes_arcs(up=True); smile(0.45, 0.3, fill=RED)
+    elif mood == "starstruck":
+        for sx in (-1, 1):
+            _star(d, cx + sx * ex, ey, er * 2.2, RED)
+        smile(0.5, 0.4, fill=RED)
     elif mood == "smug":
-        d.arc([cx - r * 0.1, mouth[1], cx + r * 0.5, mouth[3] - r * 0.1], 20, 160, fill=color, width=6)
+        for sx in (-1, 1):  # half-lidded
+            x = cx + sx * ex
+            d.chord([x - er * 1.3, ey - er * 1.3, x + er * 1.3, ey + er * 1.3], 0, 180, fill=BLACK)
+            d.line([x - er * 1.7, ey, x + er * 1.7, ey], fill=BLACK, width=lw)
+        brows(0.4, -0.4)
+        d.arc([cx - r * 0.05, my - r * 0.3, cx + r * 0.5, my + r * 0.15], 20, 150, fill=BLACK, width=lw)
+    elif mood == "shocked":
+        for sx in (-1, 1):
+            x = cx + sx * ex
+            d.ellipse([x - er * 1.5, ey - er * 1.5, x + er * 1.5, ey + er * 1.5], fill=WHITE, outline=BLACK, width=lw)
+            d.ellipse([x - er * 0.6, ey - er * 0.6, x + er * 0.6, ey + er * 0.6], fill=BLACK)
+        brows(-1.2, -0.8)
+        d.ellipse([cx - r * 0.17, my - r * 0.12, cx + r * 0.17, my + r * 0.3], fill=BLACK)
+        for sx in (-1, 1):  # "!" marks
+            x = cx + sx * r * 1.15
+            d.line([x, cy - r * 0.9, x, cy - r * 0.45], fill=RED, width=lw * 2)
+            d.ellipse([x - lw, cy - r * 0.33, x + lw, cy - r * 0.33 + 2 * lw], fill=RED)
+    elif mood == "sad":
+        eyes_dots(0.9); brows(-0.9, 0.4); frown(0.35)
+        _drop(d, cx + ex + er * 0.3, ey + er * 1.6, er * 0.9, BLUE)
+    elif mood == "worried":
+        eyes_dots(); brows(-1.0, 0.3)
+        d.line([cx - r * 0.3, my + r * 0.1, cx - r * 0.1, my + r * 0.02, cx + r * 0.1, my + r * 0.12,
+                cx + r * 0.3, my + r * 0.04], fill=BLACK, width=lw, joint="curve")  # wobbly mouth
+        _drop(d, cx + r * 0.78, cy - r * 0.6, r * 0.12, BLUE)
+    elif mood == "angry":
+        eyes_dots(0.9); brows(1.1, -0.5, color=BLACK)
+        tw, th = r * 0.42, r * 0.22  # gritted teeth
+        d.rounded_rectangle([cx - tw, my - th * 0.3, cx + tw, my + th], radius=th * 0.4,
+                            fill=WHITE, outline=BLACK, width=lw)
+        for i in range(1, 4):
+            x = cx - tw + i * tw / 2
+            d.line([x, my - th * 0.3, x, my + th], fill=BLACK, width=max(2, lw // 2))
+        d.line([cx - tw, my + th * 0.35, cx + tw, my + th * 0.35], fill=BLACK, width=max(2, lw // 2))
+        for sx in (-1, 1):  # red cheeks
+            x = cx + sx * r * 0.62
+            d.ellipse([x - r * 0.13, cy + r * 0.05, x + r * 0.13, cy + r * 0.2], fill=RED)
+    elif mood == "focused":
+        for sx in (-1, 1):  # narrowed eyes
+            x = cx + sx * ex
+            d.chord([x - er * 1.3, ey - er * 1.2, x + er * 1.3, ey + er * 1.3], 180, 360, fill=BLACK)
+        brows(0.9, 0.2)
+        d.line([cx - r * 0.25, my + r * 0.08, cx + r * 0.25, my + r * 0.05], fill=BLACK, width=lw + 1)
     elif mood == "sleepy":
-        d.ellipse([cx - r * 0.1, cy + r * 0.3, cx + r * 0.1, cy + r * 0.5], outline=BLACK, width=4)
-        zf = _font(int(r * 0.3), bold=True)
-        d.text((cx + r * 0.7, cy - r * 1.05), "z", font=zf, fill=color)
-        d.text((cx + r * 0.95, cy - r * 1.35), "Z", font=zf, fill=color)
+        eyes_arcs(up=False)
+        d.ellipse([cx - r * 0.09, my, cx + r * 0.09, my + r * 0.18], outline=BLACK, width=lw)
+        zf = _font(int(r * 0.32), bold=True)
+        d.text((cx + r * 0.75, cy - r * 1.0), "z", font=zf, fill=BLUE)
+        d.text((cx + r * 1.0, cy - r * 1.35), "Z", font=zf, fill=BLUE)
     elif mood == "calm":
-        d.arc(mouth, 20, 160, fill=color, width=6)
-    else:
-        d.line([cx - r * 0.3, cy + r * 0.35, cx + r * 0.3, cy + r * 0.35], fill=BLACK, width=6)
+        eyes_arcs(up=False); smile(0.35, 0.25)
+    else:  # neutral
+        eyes_dots()
+        d.line([cx - r * 0.28, my + r * 0.08, cx + r * 0.28, my + r * 0.08], fill=BLACK, width=lw + 1)
 
 
 def render(state, size=DEFAULT_SIZE):
@@ -92,12 +196,14 @@ def render(state, size=DEFAULT_SIZE):
     img = Image.new("RGB", size, WHITE)
     d = ImageDraw.Draw(img)
     mood = state.get("mood", "neutral")
-    color = ACCENT.get(mood, BLACK)
+    if mood not in ACCENT:
+        mood = "neutral"
+    color = ACCENT[mood]
     s = w / 800  # scale everything from the 800x480 design
 
     # Face
-    face_r = int(130 * s)
-    draw_face(d, int(170 * s), int(200 * s), face_r, mood, color)
+    face_r = int(125 * s)
+    draw_face(d, int(170 * s), int(215 * s), face_r, mood)
 
     # Mood label + message
     x0 = int(340 * s)
@@ -193,6 +299,7 @@ class EinkDisplay:
         self.pending = None
         self.pending_force = False
         self.busy = False
+        self.timer = None  # wakes up a skipped (rate-limited) update later
         self.lock = threading.Lock()
         model = model or os.environ.get("EINK_MODEL") or DEFAULT_MODEL
         try:
@@ -211,7 +318,22 @@ class EinkDisplay:
             self.pending_force = self.pending_force or force
             if self.busy:
                 return  # the running refresh will handle a forced update afterward
-            if not self.pending_force and time.time() - self.last_refresh < self.min_interval:
+            wait = self.min_interval - (time.time() - self.last_refresh)
+            if not self.pending_force and wait > 0:
+                # Too soon: show it once the rate limit allows, so in-match
+                # reactions still appear (just a little later).
+                if self.timer is None:
+                    self.timer = threading.Timer(wait, self._wake)
+                    self.timer.daemon = True
+                    self.timer.start()
+                return
+            self.busy = True
+        threading.Thread(target=self._worker, daemon=True).start()
+
+    def _wake(self):
+        with self.lock:
+            self.timer = None
+            if self.busy or self.pending is None:
                 return
             self.busy = True
         threading.Thread(target=self._worker, daemon=True).start()

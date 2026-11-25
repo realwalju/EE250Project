@@ -188,11 +188,13 @@ class Hub:
         if self.display:
             self.display.request(self.eink_state(), force=force)
 
-    def _companion_changed(self):
+    def _companion_changed(self, urgent=True):
         snap = self.companion.snapshot()
         self.add_feed("companion", {"mood": snap["mood"], "message": snap["message"]})
         print(f"  companion ({snap['mood']}): {snap['message']}")
-        self.refresh_eink(force=True)
+        # Urgent (recaps, tilt, wins) refresh right away; in-match reactions
+        # wait for the display's rate limit so it doesn't flash nonstop.
+        self.refresh_eink(force=urgent)
 
     # ---------- outputs ----------
     def effect(self, name):
@@ -232,6 +234,8 @@ class Hub:
             self.effect("match")
         if etype in GAME_EFFECTS:
             self.effect(GAME_EFFECTS[etype])
+        if self.match.in_match:
+            self.companion.on_game_event(etype, now)
         if self.tilt.on_game_event(etype, now):
             self.on_tilt()
         if summary:
@@ -242,7 +246,7 @@ class Hub:
         if self.tilt.on_vibration(int(data.get("vib") or 0), now):
             self.on_tilt()
         if not self.match.in_match:
-            self.companion.check_late_night(data.get("light_pct"))
+            self.companion.check_late_night()
 
     def on_button(self, data, now):
         button_id = data.get("id")
@@ -252,8 +256,11 @@ class Hub:
             self.db.execute("INSERT INTO clips VALUES (?, ?)", (now, self.match.match_id))
             self.db.commit()
             print("  clip saved")
+            self.effect("clip")
+            self.companion.react("clip")
         elif button_id == "interact":
             self.publish(T_NOTIFY, {"msg": 0})  # stop the LED's "new message" blink
+            self.effect("ping")
             self.refresh_eink(force=True)
         elif button_id == "mode":
             self.study_mode = not self.study_mode
@@ -300,7 +307,7 @@ def main():
     if not args.no_eink:
         from eink import EinkDisplay
         color = {"auto": None, "mono": False, "color": True}[args.eink_color]
-        display = EinkDisplay(min_interval=60, model=args.eink_model, color=color)
+        display = EinkDisplay(min_interval=20, model=args.eink_model, color=color)
     hub = Hub(publish, args.db, display=display)
 
     # Web dashboard in a background thread

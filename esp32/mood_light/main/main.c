@@ -5,7 +5,8 @@
 // {"effect":"victory"}.
 //
 //   Base modes (stay on):      lobby, match, study, off
-//   One-shot effects (then back to the base mode): elim, knocked, eliminated, victory, tilt
+//   One-shot effects (then back to the base mode): elim, knocked, eliminated, victory, tilt,
+//                                                  clip, ping
 //
 // AI-assisted: initial version generated with Claude (Anthropic), then
 // reviewed and tested by the team.
@@ -38,7 +39,7 @@
 static const char *TAG = "mood_light";
 
 typedef enum { BASE_LOBBY, BASE_MATCH, BASE_STUDY, BASE_OFF } base_mode_t;
-typedef enum { FX_NONE, FX_ELIM, FX_KNOCKED, FX_ELIMINATED, FX_VICTORY, FX_TILT } effect_t;
+typedef enum { FX_NONE, FX_ELIM, FX_KNOCKED, FX_ELIMINATED, FX_VICTORY, FX_TILT, FX_CLIP, FX_PING } effect_t;
 
 // Written by the MQTT task, read by the render task
 static volatile base_mode_t s_base = BASE_LOBBY;
@@ -87,6 +88,8 @@ static void apply_command(const char *name)
     else if (!strcmp(name, "eliminated")) { s_effect_start_ms = t; s_effect = FX_ELIMINATED; }
     else if (!strcmp(name, "victory"))    { s_effect_start_ms = t; s_effect = FX_VICTORY; }
     else if (!strcmp(name, "tilt"))       { s_effect_start_ms = t; s_effect = FX_TILT; }
+    else if (!strcmp(name, "clip"))       { s_effect_start_ms = t; s_effect = FX_CLIP; }
+    else if (!strcmp(name, "ping"))       { s_effect_start_ms = t; s_effect = FX_PING; }
     else ESP_LOGW(TAG, "unknown effect: %s", name);
 }
 
@@ -150,6 +153,23 @@ static bool render_one_shot(int64_t now)
         if (t > 3000) return false;
         float b = (30 + esp_random() % 70) / 100.0f;
         set_rgb(1.0f * b, 0.35f * b, 0.0f);
+        return true;
+    }
+    case FX_CLIP:  // camera flash: two white flashes, then a cyan glow fading out
+        if (t > 1400) return false;
+        if (t < 120 || (t >= 240 && t < 360)) {
+            set_rgb(1, 1, 1);
+        } else if (t < 360) {
+            set_rgb(0, 0, 0);
+        } else {
+            float b = 1.0f - (t - 360) / 1040.0f;
+            set_rgb(0.0f, 0.8f * b, 1.0f * b);
+        }
+        return true;
+    case FX_PING: {  // short cyan blip (interact button)
+        if (t > 300) return false;
+        float b = sinf((float)M_PI * t / 300.0f);
+        set_rgb(0.0f, 0.8f * b, 1.0f * b);
         return true;
     }
     default:

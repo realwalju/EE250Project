@@ -84,7 +84,28 @@ def test_buttons_clip_and_study_mode():
     assert hub.db.execute("SELECT COUNT(*) FROM clips").fetchone()[0] == 1
     hub.handle(T_BUTTON, {"id": "mode"}, 2.0)
     hub.handle(T_BUTTON, {"id": "mode"}, 3.0)
-    assert effects(sent) == ["study", "lobby"]
+    hub.handle(T_BUTTON, {"id": "interact"}, 4.0)
+    assert effects(sent) == ["clip", "study", "lobby", "ping"]
+
+
+def test_companion_reacts_during_match():
+    hub, _ = make_hub()
+    moods = []
+    hub.handle("desk/game/event", {"type": "match_start"}, 0.0)
+    moods.append(hub.companion.mood)
+    hub.handle("desk/game/event", {"type": "elim"}, 5.0)
+    moods.append(hub.companion.mood)
+    hub.handle("desk/game/event", {"type": "knocked"}, 60.0)
+    moods.append(hub.companion.mood)
+    assert moods == ["focused", "hype", "shocked"]
+
+
+def test_late_night_is_time_based():
+    from datetime import datetime
+    from companion import Companion
+    c = Companion()
+    assert not c.check_late_night(datetime(2026, 11, 24, 22, 0))
+    assert c.check_late_night(datetime(2026, 11, 25, 1, 30)) and c.mood == "sleepy"
 
 
 def test_companion_recap_falls_back_without_api_key(monkeypatch):
@@ -116,8 +137,10 @@ def test_web_api():
 
 def test_eink_render():
     pytest.importorskip("PIL")
-    from eink import render
-    for mood in ("happy", "smug", "worried", "sleepy", "calm", "neutral"):
+    from eink import render, MOODS
+    from companion import MOODS as REACTION_MOODS
+    assert {m for ms in REACTION_MOODS.values() for m in ms} <= set(MOODS)  # every mood has a face
+    for mood in MOODS:
         img = render({"mood": mood, "message": "test", "session": {}, "sensors": {"temp_c": 22.5}}, (800, 480))
         assert img.size == (800, 480)
 

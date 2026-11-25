@@ -65,7 +65,6 @@ DASHBOARD_HTML = """<!doctype html>
   </div>
   <div class="card"><h2>Room</h2>
     <div class="row"><span class="muted">Temperature</span><span id="temp">-</span></div>
-    <div class="row"><span class="muted">Light</span><span id="light">-</span></div>
     <div class="row"><span class="muted">Desk vibration (last 5 s)</span><span id="vib">-</span></div>
   </div>
   <div class="card" style="grid-column: span 2"><h2>Event log</h2><div id="log"></div></div>
@@ -93,7 +92,6 @@ async function poll() {
     $('recap').textContent = s.companion.last_recap ? 'Last recap: ' + s.companion.last_recap.text : '';
     const r = s.sensors || {};
     $('temp').textContent = (typeof r.temp_c === 'number') ? `${(r.temp_c * 9/5 + 32).toFixed(1)} F` : '-';
-    $('light').textContent = (r.light_pct ?? '-') + (r.light_pct != null ? ' %' : '');
     $('vib').textContent = s.vib_recent;
     $('matches').innerHTML = '';
     for (const m of s.matches) {

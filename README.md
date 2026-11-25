@@ -5,7 +5,7 @@
 A desk system that reacts to Fortnite games in real time. The gaming PC detects
 game events from the screen with computer vision, a Raspberry Pi 5 hub turns them
 into lighting effects and LLM-written recaps on an e-ink "desk companion", and our custom ESP32-S3 sensor PCB adds a button, a status LED and
-room sensors (light, temperature, desk vibration).
+room sensors (temperature, desk vibration).
 
 See [`docs/overview.md`](docs/overview.md) for the full design.
 
@@ -17,7 +17,7 @@ See [`docs/overview.md`](docs/overview.md) for the full design.
 ```
 esp32/                ESP-IDF v5/v6 projects
   components/desk_net/  Shared Wi-Fi + MQTT code for both boards
-  sensor_board/   ESP32-S3 on our custom PCB: button, LED, light, temp, vibration
+  sensor_board/   ESP32-S3 on our custom PCB: button, LED, temp, vibration
   mood_light/     ESP32-S3 using its built-in RGB LED for live game effects
 pi/
   hub.py          Central hub: MQTT logic, match state, tilt detection, SQLite log
@@ -44,7 +44,7 @@ docs/
 | `desk/pc/activity` | PC -> Pi | `{"app":"FortniteClient","input_rate":42}` |
 | `desk/leds/effect` | Pi -> mood light | `{"effect":"victory"}` |
 | `desk/input/button` | Sensor board -> Pi | `{"id":"clip","press":"short"}` |
-| `desk/sensors` | Sensor board -> Pi | `{"light_pct":63,"temp_c":23.4,"vib":2}` |
+| `desk/sensors` | Sensor board -> Pi | `{"temp_c":23.4,"vib":2}` |
 | `desk/notify` | Pi -> sensor board | `{"msg":1}` (LED double-blinks) |
 
 ## Setup

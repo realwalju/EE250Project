@@ -26,14 +26,32 @@ PERSONALITY = (
 )
 
 REACTIONS = {
+    "start": ["Drop in. Let's go.", "Bus is moving. Focus up.", "Locked in. Don't land dumb."],
+    "elim": ["Got one!", "Clean. Do it again.", "That's an elim.", "Sent them back to the lobby."],
+    "multi": ["Another one! You're cooking.", "DOUBLE. Who is this?", "Okay, chill. Leave some for everyone."],
+    "knocked": ["Uh oh. Get up!", "Knocked?! Rez, rez, rez.", "That was not the plan."],
     "tilt": ["Breathe. The desk didn't do anything.", "Easy. That desk is innocent.",
              "Tilt detected. Maybe hydrate?"],
     "win": ["VICTORY ROYALE. Who even are you?", "A win! I'm telling everyone.",
             "Crown secured. Insufferable now."],
     "loss": ["Back to the bus.", "We don't talk about that one.", "Shake it off. Requeue."],
+    "clip": ["Clipped! That's going in the montage.", "Saved. The internet will see this.",
+             "Clip it. Frame it. Post it."],
     "study": ["Study mode. I'll be quiet. Mostly.", "Books out. Fortnite can wait."],
-    "late": ["It's {time}. Your bed misses you.", "{time} and the lights are off. Sleep?"],
+    "late": ["It's {time}. Your bed misses you.", "{time} already? One more game turns into five."],
 }
+
+# Which face each reaction uses. Some have a few options so it doesn't get stale.
+MOODS = {
+    "start": ["focused"], "elim": ["hype"], "multi": ["hype", "starstruck"],
+    "knocked": ["shocked"], "tilt": ["worried", "angry"], "win": ["proud"],
+    "loss": ["sad", "smug"], "clip": ["starstruck"], "study": ["calm"], "late": ["sleepy"],
+}
+
+# In-match reactions are "soft": the e-ink shows them on its next allowed
+# refresh instead of forcing one, so a long fight doesn't make it flash nonstop.
+SOFT = {"start", "elim", "multi", "knocked", "clip"}
+MULTI_WINDOW = 15.0  # an elim within this many seconds of the last one = multi
 
 
 def load_env(path=os.path.join(os.path.dirname(__file__), ".env")):
@@ -51,13 +69,15 @@ def load_env(path=os.path.join(os.path.dirname(__file__), ".env")):
 class Companion:
     def __init__(self, on_update=None):
         load_env()
-        self.on_update = on_update or (lambda: None)  # called whenever the message changes
+        self.on_update = on_update or (lambda urgent=True: None)  # called whenever the message changes
         self.mood = "neutral"
         self.message = "Hey. Let's play."
         self.last_recap = None
         self.session = {"games": 0, "wins": 0, "elims": 0, "tilts": 0}
         self._client = None
         self._lock = threading.Lock()
+        self._last_elim = None
+        self._last_late = None
 
     # ---------- state ----------
     def snapshot(self):
@@ -65,27 +85,43 @@ class Companion:
             return {"mood": self.mood, "message": self.message,
                     "last_recap": self.last_recap, "session": dict(self.session)}
 
-    def _say(self, mood, message):
+    def _say(self, mood, message, urgent=True):
         with self._lock:
             self.mood, self.message = mood, message
-        self.on_update()
+        self.on_update(urgent)
 
     # ---------- quick reactions (instant, no LLM) ----------
     def react(self, kind, **fmt):
-        mood = {"tilt": "worried", "win": "happy", "loss": "smug",
-                "study": "calm", "late": "sleepy"}.get(kind, "neutral")
         if kind == "tilt":
             with self._lock:
                 self.session["tilts"] += 1
-        self._say(mood, random.choice(REACTIONS[kind]).format(**fmt))
+        mood = random.choice(MOODS.get(kind, ["neutral"]))
+        self._say(mood, random.choice(REACTIONS[kind]).format(**fmt), urgent=kind not in SOFT)
 
-    def check_late_night(self, light_pct, now=None):
-        """Lights off after midnight -> sleepy nudge. Returns True if it reacted."""
+    def on_game_event(self, etype, now=None):
+        """Live reactions during a match (match end is handled by on_match_end)."""
+        now = time.time() if now is None else now
+        if etype == "match_start":
+            self._last_elim = None
+            self.react("start")
+        elif etype == "elim":
+            multi = self._last_elim is not None and now - self._last_elim < MULTI_WINDOW
+            self._last_elim = now
+            self.react("multi" if multi else "elim")
+        elif etype == "knocked":
+            self.react("knocked")
+
+    def check_late_night(self, now=None):
+        """After midnight -> sleepy nudge, at most once every 30 min. Returns True if it reacted."""
         now = now or datetime.now()
-        if 0 <= now.hour < 5 and light_pct is not None and light_pct < 10 and self.mood != "sleepy":
-            self.react("late", time=now.strftime("%I:%M %p").lstrip("0"))
-            return True
-        return False
+        ts = now.timestamp()
+        if not 0 <= now.hour < 5 or self.mood == "sleepy":
+            return False
+        if self._last_late is not None and ts - self._last_late < 1800:
+            return False
+        self._last_late = ts
+        self.react("late", time=now.strftime("%I:%M %p").lstrip("0"))
+        return True
 
     # ---------- post-match ----------
     def on_match_end(self, summary):

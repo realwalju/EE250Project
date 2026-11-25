@@ -12,7 +12,7 @@ A desk system that reacts to your Fortnite games in real time and keeps track of
 |---|---|---|
 | Gaming PC | Windows PC | Captures the game screen, detects events with OpenCV, tracks PC activity (focused app, input rate) |
 | Raspberry Pi 5 | Pi 5 + e-ink display | MQTT broker (Mosquitto), match state tracking, mood logic, SQLite database, Flask dashboard, LLM API calls, e-ink output |
-| Desk sensor board | ESP32-S3 on our custom PCB | Push button, status LED, light sensor, temperature sensor, vibration switch |
+| Desk sensor board | ESP32-S3 on our custom PCB | Push button, status LED, temperature sensor, vibration switch |
 | Mood light | ESP32-S3 (built-in RGB LED) | Live lighting effects for game events |
 | Laptop | Any browser | Web dashboard |
 | Spare | ESP32-S3 | Backup, or a second mood light |
@@ -30,7 +30,6 @@ In one line: PC sees, Pi decides, ESP32s show and take input, e-ink and dashboar
 
 | Part | Pin | Purpose |
 |---|---|---|
-| Photoresistor (GL5549) | GPIO 4 (ADC) | Room light level, e.g. gaming in the dark late at night |
 | NTC thermistor | GPIO 5 (ADC) | Room temperature over a session |
 | Vibration switch | GPIO 6 | Desk slam detection, used for tilt detection |
 | Push button | GPIO 7 | Clip a moment, interact with the companion (short, long and double press) |
@@ -38,7 +37,7 @@ In one line: PC sees, Pi decides, ESP32s show and take input, e-ink and dashboar
 
 ## Data processing
 - **Computer vision on the PC:** crops screen regions (health bar, elimination feed, center banner) and uses color thresholds, template matching and OCR to recognize events. An event only counts if it appears in several consecutive frames, which filters out false triggers.
-- **Combining several signals:** tilt detection combines game events (knocked or eliminated) with bursts of desk vibration counted over a short time window. The companion's mood combines PC activity, time of day, room light and recent match results.
+- **Combining several signals:** tilt detection combines game events (knocked or eliminated) with bursts of desk vibration counted over a short time window. The companion's mood combines live game events, time of day, button presses and recent match results.
 - **Sensor signal processing:** converts the thermistor reading to temperature with the Beta equation, smooths the ADC readings, and counts vibration pulses over a time window.
 - **Match state tracking on the Pi:** lobby -> in match -> match ended.
 - **LLM:** post-match coaching recaps and the companion's personality and nudges. It is kept out of the real-time path.
@@ -47,9 +46,9 @@ In one line: PC sees, Pi decides, ESP32s show and take input, e-ink and dashboar
 
 | Output | Speed | What it shows |
 |---|---|---|
-| Mood light (RGB LED) | Under 1 second | White pulse = elimination, red flash = knocked, gold = Victory Royale, orange flicker = tilt, blue = study mode |
+| Mood light (RGB LED) | Under 1 second | White pulse = elimination, red flash = knocked, gold = Victory Royale, orange flicker = tilt, camera flash + cyan = clip saved, blue = study mode |
 | PCB status LED | Instant | Breathing = connected, fast blink = disconnected, double blink = new message, flash = button received |
-| E-ink display | Every match / every 10-15 min | Companion face and mood, LLM recap, session stats, nudges |
+| E-ink display | ~20 s during a match, instantly for recaps | Companion face (13 expressions: hype on elims, shocked when knocked, crown on a win...), LLM recap, session stats, nudges |
 | Web dashboard | Real time | Event timeline, match history, sensor graphs |
 
 ## Key design choices

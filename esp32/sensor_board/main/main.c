@@ -1,6 +1,6 @@
 // Desk sensor board: ESP32-S3 (YD-ESP32-S3) on our custom PCB, ESP-IDF v5/v6.
 //
-// Reads the button, light sensor, thermistor and vibration switch, publishes
+// Reads the button, thermistor and vibration switch, publishes
 // them over MQTT, and drives the status LED.
 //
 //   Button  (GPIO 7): short press = clip, double press = interact, long press = mode
@@ -33,7 +33,7 @@
 #endif
 
 // ---------- Pins (match our KiCad PCB) ----------
-#define PIN_LIGHT GPIO_NUM_4  // 3V3 - LDR - GPIO4 - 10k - GND  (ADC1)
+// GPIO 4 has the photoresistor on our PCB; it gave unreliable readings, so it's unused.
 #define PIN_TEMP  GPIO_NUM_5  // 3V3 - NTC - GPIO5 - 10k - GND  (ADC1)
 #define PIN_VIB   GPIO_NUM_6  // vibration switch to GND, 10k pull-up -> LOW when shaken
 #define PIN_BTN   GPIO_NUM_7  // push button to GND, 10k pull-up -> LOW when pressed
@@ -74,7 +74,7 @@ static portMUX_TYPE s_vib_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t s_cali;
-static adc_channel_t s_ch_light, s_ch_temp;
+static adc_channel_t s_ch_temp;
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0)
 #define ADC_ATTEN ADC_ATTEN_DB_12
@@ -272,14 +272,12 @@ static void hw_init(void)
     };
     ESP_ERROR_CHECK(ledc_channel_config(&channel));
 
-    // ADC1 for the light sensor and thermistor, with factory calibration
+    // ADC1 for the thermistor, with factory calibration
     adc_oneshot_unit_init_cfg_t unit_cfg = {.unit_id = ADC_UNIT_1};
     ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &s_adc));
     adc_unit_t unit;
-    ESP_ERROR_CHECK(adc_oneshot_io_to_channel(PIN_LIGHT, &unit, &s_ch_light));
     ESP_ERROR_CHECK(adc_oneshot_io_to_channel(PIN_TEMP, &unit, &s_ch_temp));
     adc_oneshot_chan_cfg_t chan_cfg = {.atten = ADC_ATTEN, .bitwidth = ADC_BITWIDTH_DEFAULT};
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc, s_ch_light, &chan_cfg));
     ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc, s_ch_temp, &chan_cfg));
     adc_cali_curve_fitting_config_t cali_cfg = {
         .unit_id = ADC_UNIT_1,
@@ -301,14 +299,11 @@ void app_main(void)
     static const char *const topics[] = {T_NOTIFY};
     desk_net_start(WIFI_SSID, WIFI_PASS, MQTT_HOST, MQTT_PORT, CLIENT_ID, topics, 1, on_message);
 
-    float light_avg = -1, temp_avg = -1;
+    float temp_avg = -1;
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(SENSOR_PERIOD_MS));
 
-        light_avg = smooth(light_avg, (float)read_mv(s_ch_light));
         temp_avg = smooth(temp_avg, (float)read_mv(s_ch_temp));
-        int light_pct = (int)(light_avg / VCC_MV * 100.0f);  // brighter = higher
-        light_pct = light_pct < 0 ? 0 : (light_pct > 100 ? 100 : light_pct);
         float temp_c = thermistor_c(temp_avg);
         uint32_t vib = take_vib_pulses();
 
@@ -318,9 +313,8 @@ void app_main(void)
         } else {
             snprintf(temp_str, sizeof(temp_str), "%.1f", temp_c);
         }
-        char msg[128];
-        snprintf(msg, sizeof(msg), "{\"light_mv\":%d,\"light_pct\":%d,\"temp_c\":%s,\"vib\":%lu}",
-                 (int)light_avg, light_pct, temp_str, (unsigned long)vib);
+        char msg[64];
+        snprintf(msg, sizeof(msg), "{\"temp_c\":%s,\"vib\":%lu}", temp_str, (unsigned long)vib);
         if (desk_net_publish(T_SENSORS, msg)) {
             ESP_LOGI(TAG, "%s", msg);
         }
