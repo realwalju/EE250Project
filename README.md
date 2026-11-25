@@ -23,6 +23,7 @@ pi/
   hub.py          Central hub: MQTT logic, match state, tilt detection, SQLite log
   companion.py    Companion mood, quick reactions, LLM post-match recaps
   eink.py         Draws the companion screen on the Waveshare 7.3" e-ink display
+  preview_eink.py  Previews robot expressions and full screens, without hardware
   web.py          Flask dashboard
   mosquitto.conf  MQTT broker config for the Pi
 pc/
@@ -81,10 +82,30 @@ ls ~/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd   # driver names
 The hub drives our Waveshare 7.3" Spectra 6 panel (`epd7in3e`) by default, so
 `python hub.py` is enough. For a different panel pass its driver name with
 `--eink-model` (or set `EINK_MODEL` in `pi/.env`).
-Black/white panels are thresholded to pure black; 7-colour panels (names ending
-in `f` or `e`) get colour. Force either with `--eink-color mono|color`. Without
-a display (or with `--no-eink`) the hub saves `pi/eink_preview.png` instead. For a Pimoroni
-Inky, use `--eink-model inky`.
+Black/white panels are thresholded to pure black; colour panels (names ending
+in `f` or `e`) use their ink palette. Force either with `--eink-color mono|color`.
+The robot design uses black and white on either panel, with 12 distinct
+expressions, fitted recap text, and separate session stats. Without a connected
+display, the hub saves `pi/eink_preview.png` instead; `--no-eink` disables display
+updates entirely. For a Pimoroni Inky, use `--eink-model inky`.
+
+Preview the design on any computer with Pillow installed, from the repo root:
+
+```bash
+python pi/preview_eink.py --mood happy
+python pi/preview_eink.py --sheet --output docs/eink-moods.png
+python pi/preview_eink.py --faces --output docs/eink-faces.png
+```
+
+Use `--message "Your custom recap"` to check text wrapping. The preview uses
+sample stats, without contacting the Pi. [See the expression gallery](docs/eink-faces.png)
+or [all full-screen previews](docs/eink-moods.png).
+
+The moods are neutral, happy, smug, worried, calm, sleepy, focused, excited,
+surprised, sad, annoyed, and playful. Match starts, eliminations, and knocks
+trigger focused, excited, and surprised reactions; losses and tilt randomly
+choose between their two expressions, and the interact button gets a playful wink.
+Frequent in-match reactions use the display's existing refresh limit.
 
 The hub also serves the dashboard at `http://<PI_IP>:5000/` (open it on the laptop).
 

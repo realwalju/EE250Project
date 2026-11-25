@@ -27,9 +27,11 @@ PERSONALITY = (
 
 REACTIONS = {
     "start": ["Drop in. Let's go.", "Bus is moving. Focus up.", "Locked in. Don't land dumb."],
-    "elim": ["Got one!", "Clean. Do it again.", "That's an elim.", "Sent them back to the lobby."],
+    "elim": ["Got one!", "Clean. Do it again.", "That's an elim.", "Sent them back to the lobby.",
+             "Okay, I saw that. Nice shot.", "One down. Keep that momentum."],
     "multi": ["Another one! You're cooking.", "DOUBLE. Who is this?", "Okay, chill. Leave some for everyone."],
-    "knocked": ["Uh oh. Get up!", "Knocked?! Rez, rez, rez.", "That was not the plan."],
+    "knocked": ["Uh oh. Get up!", "Knocked?! Rez, rez, rez.", "That was not the plan.",
+                "Plot twist. Find some cover.", "Still in this. Crawl to cover."],
     "tilt": ["Breathe. The desk didn't do anything.", "Easy. That desk is innocent.",
              "Tilt detected. Maybe hydrate?"],
     "win": ["VICTORY ROYALE. Who even are you?", "A win! I'm telling everyone.",
@@ -39,13 +41,16 @@ REACTIONS = {
              "Clip it. Frame it. Post it."],
     "study": ["Study mode. I'll be quiet. Mostly.", "Books out. Fortnite can wait."],
     "late": ["It's {time}. Your bed misses you.", "{time} already? One more game turns into five."],
+    "interact": ["You rang? Your emotional support robot is here.",
+                 "Boop received. Carry on, legend."],
 }
 
 # Which face each reaction uses. Some have a few options so it doesn't get stale.
 MOODS = {
-    "start": ["focused"], "elim": ["hype"], "multi": ["hype", "starstruck"],
-    "knocked": ["shocked"], "tilt": ["worried", "angry"], "win": ["proud"],
-    "loss": ["sad", "smug"], "clip": ["starstruck"], "study": ["calm"], "late": ["sleepy"],
+    "start": ["focused"], "elim": ["excited"], "multi": ["excited"],
+    "knocked": ["surprised"], "tilt": ["worried", "annoyed"], "win": ["happy"],
+    "loss": ["smug", "sad"], "clip": ["excited"], "study": ["calm"], "late": ["sleepy"],
+    "interact": ["playful"],
 }
 
 # In-match reactions are "soft": the e-ink shows them on its next allowed
@@ -78,6 +83,8 @@ class Companion:
         self._lock = threading.Lock()
         self._last_elim = None
         self._last_late = None
+        self._revision = 0
+        self._latest_match_id = None
 
     # ---------- state ----------
     def snapshot(self):
@@ -88,15 +95,19 @@ class Companion:
     def _say(self, mood, message, urgent=True):
         with self._lock:
             self.mood, self.message = mood, message
+            self._revision += 1
+            revision = self._revision
         self.on_update(urgent)
+        return revision
 
     # ---------- quick reactions (instant, no LLM) ----------
     def react(self, kind, **fmt):
+        kind = "start" if kind == "match_start" else kind
+        mood = random.choice(MOODS[kind])
         if kind == "tilt":
             with self._lock:
                 self.session["tilts"] += 1
-        mood = random.choice(MOODS.get(kind, ["neutral"]))
-        self._say(mood, random.choice(REACTIONS[kind]).format(**fmt), urgent=kind not in SOFT)
+        return self._say(mood, random.choice(REACTIONS[kind]).format(**fmt), urgent=kind not in SOFT)
 
     def on_game_event(self, etype, now=None):
         """Live reactions during a match (match end is handled by on_match_end)."""
@@ -126,18 +137,27 @@ class Companion:
     # ---------- post-match ----------
     def on_match_end(self, summary):
         with self._lock:
+            self._latest_match_id = summary["match_id"]
             self.session["games"] += 1
             self.session["elims"] += summary["elims"]
             if summary["result"] == "win":
                 self.session["wins"] += 1
-        self.react("win" if summary["result"] == "win" else "loss")
-        threading.Thread(target=self._recap, args=(summary,), daemon=True).start()
+        revision = self.react("win" if summary["result"] == "win" else "loss")
+        threading.Thread(target=self._recap, args=(summary, revision), daemon=True).start()
 
-    def _recap(self, summary):
+    def _recap(self, summary, revision):
         text = self._llm_recap(summary) or self._template_recap(summary)
         with self._lock:
+            # A slow response must not replace a newer match's recap, or the
+            # current face/message after another game event or button press.
+            if summary["match_id"] != self._latest_match_id:
+                return
             self.last_recap = {"match_id": summary["match_id"], "text": text, "ts": time.time()}
-        self._say(self.mood, text)
+            if revision != self._revision:
+                return
+            self.message = text
+            self._revision += 1
+        self.on_update(True)
 
     def _template_recap(self, s):
         minutes = s["duration_s"] / 60

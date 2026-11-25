@@ -261,7 +261,7 @@ class Hub:
         elif button_id == "interact":
             self.publish(T_NOTIFY, {"msg": 0})  # stop the LED's "new message" blink
             self.effect("ping")
-            self.refresh_eink(force=True)
+            self.companion.react("interact")
         elif button_id == "mode":
             self.study_mode = not self.study_mode
             print(f"  study mode {'on' if self.study_mode else 'off'}")
