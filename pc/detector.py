@@ -68,6 +68,7 @@ TEMPLATE_REGIONS = [
     ("elim/*enemy_eliminated*", KILL_POPUP),
     ("elim/*elimination_banner*", KILL_BANNER),
     ("elim/*double_elim*", KILL_BANNER),
+    ("victory/*victory_badge*", (0.30, 0.0, 0.40, 0.30)),  # "#1 VICTORY ROYALE" badge, top centre
 ]
 
 # A score this high is trusted from a single frame (frames without the
