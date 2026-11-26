@@ -72,8 +72,9 @@ TEMPLATE_REGIONS = [
 
 # Similarity needed to count as "seen" (0-1). Tune with --test / --debug.
 THRESHOLDS = {event: 0.80 for event in EVENTS}
-# Real kills score 0.91+, busy non-kill scenes reach ~0.75 on the elim templates
-THRESHOLDS["elim"] = 0.84
+# Kill templates search small boxes (TEMPLATE_REGIONS). Live kills score ~0.8+,
+# frames without a kill stay under ~0.70 in those boxes.
+THRESHOLDS["elim"] = 0.76
 
 # Resolution independence: Fortnite sizes its HUD to the largest 16:9 area
 # that fits the screen, so the HUD scales with min(height, width * 9/16)
