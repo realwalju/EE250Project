@@ -34,9 +34,14 @@ Events without templates are simply skipped.
 4. Add a second crop of the same message from another match if one template
    misses sometimes.
 
-All templates are stored at a 1080p reference size and every frame is resized to
-the same height before matching, so templates made on a 1920x1080 PC work on a
-2880x1800 laptop and the other way around (Fortnite's HUD scales with screen
-height). If you crop by hand in an editor instead of `--crop`, resize the crop by
-1080 / (your screenshot's height) before saving. Changing the in-game HUD scale
+All templates are stored at a 1080p reference size and every frame is resized so
+its HUD is the same size before matching, so templates made on a 1920x1080 PC
+work on a 2880x1800 laptop and the other way around. Fortnite lays its HUD out in
+the largest 16:9 area that fits, so the HUD size follows min(height, width x 9/16):
+the height on a 16:9 screen, the width on a 16:10 laptop. If you crop by hand in
+an editor instead of `--crop`, resize the crop by 1080 / that number first.
+
+A message that always appears in the same spot can get its own small search box in
+`TEMPLATE_REGIONS` (detector.py), matched by file name. The kill popup and kill
+banner templates do this, which makes detection faster. Changing the in-game HUD scale
 still needs new templates.

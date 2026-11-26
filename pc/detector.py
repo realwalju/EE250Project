@@ -10,9 +10,9 @@ How detection works:
   1. pc/templates/<event>/*.png hold small cropped images of the on-screen
      message for each event (e.g. the "VICTORY ROYALE" text). Make them from
      your own screenshots, see pc/templates/README.md.
-  2. Each frame is converted to grayscale and resized to a fixed height
-     (WORK_HEIGHT), so any screen resolution looks the same to the matcher
-     (Fortnite's HUD scales with screen height). Then cv2.matchTemplate slides each template over the event's search
+  2. Each frame is converted to grayscale and resized so its HUD is a fixed
+     size (WORK_HEIGHT), so any screen resolution looks the same to the
+     matcher. Then cv2.matchTemplate slides each template over the event's search
      region at a few scales and returns a 0-1 similarity score.
   3. A score above the event's threshold counts as "seen". ConfirmFilter only
      reports an event after 2 consecutive frames, and a banner that stays up
@@ -31,6 +31,7 @@ and tested by the team.
 """
 
 import argparse
+import fnmatch
 import glob
 import json
 import os
@@ -58,18 +59,31 @@ SEARCH_REGIONS["elim"] = (0.15, 0.05, 0.85, 0.85)  # "+300 ENEMY ELIMINATED" pop
 SEARCH_REGIONS["eliminated"] = (0.15, 0.0, 0.70, 0.90)  # "ELIMINATED BY" sits at the very top edge
 SEARCH_REGIONS["knocked"] = (0.0, 0.85, 0.30, 0.15)   # red health bar + X icon, bottom-left
 
+# Some messages always appear in the same spot, so their templates only search
+# a small box there (much faster than the whole event region, and fewer false
+# matches). Patterns match "<event>/<file name>"; others use SEARCH_REGIONS.
+KILL_POPUP = (0.70, 0.30, 0.30, 0.40)   # "+300 ENEMY ELIMINATED" stack, right side
+KILL_BANNER = (0.30, 0.62, 0.40, 0.25)  # "ELIMINATION!" / "DOUBLE ELIM!", bottom centre
+TEMPLATE_REGIONS = [
+    ("elim/*enemy_eliminated*", KILL_POPUP),
+    ("elim/*elimination_banner*", KILL_BANNER),
+    ("elim/*double_elim*", KILL_BANNER),
+]
+
 # Similarity needed to count as "seen" (0-1). Tune with --test / --debug.
 THRESHOLDS = {event: 0.80 for event in EVENTS}
 # Real kills score 0.91+, busy non-kill scenes reach ~0.75 on the elim templates
 THRESHOLDS["elim"] = 0.84
 
-# Resolution independence: templates are stored as if the screen were
-# TEMPLATE_HEIGHT pixels tall, and every frame is resized to WORK_HEIGHT tall
-# before matching. So screenshots and templates from a 1920x1080 PC and a
-# 2880x1800 laptop work together. Use --crop to save templates; it rescales.
+# Resolution independence: Fortnite sizes its HUD to the largest 16:9 area
+# that fits the screen, so the HUD scales with min(height, width * 9/16)
+# (on a 16:10 laptop that's the width, not the height). Templates are stored
+# as if that size were TEMPLATE_HEIGHT, and every frame is resized so it is
+# WORK_HEIGHT before matching. So a 1920x1080 PC and a 2880x1800 laptop share
+# screenshots and templates. Use --crop to save templates; it rescales.
 TEMPLATE_HEIGHT = 1080
 WORK_HEIGHT = 900           # matching resolution; lower = faster, less precise
-SCALES = (0.9, 1.0, 1.1)    # also try templates slightly smaller/larger
+SCALES = (0.9, 0.95, 1.0, 1.05, 1.1)  # small text matches only within ~3% of its size
 
 
 # ---------- image helpers ----------
@@ -84,9 +98,15 @@ def _resize(gray, scale):
     return cv2.resize(gray, None, fx=scale, fy=scale, interpolation=interp)
 
 
+def hud_height(shape):
+    """Height of the 16:9 area the HUD is laid out in (see above)."""
+    h, w = shape[:2]
+    return min(h, w * 9 / 16)
+
+
 def prep_frame(frame_bgr):
-    """Full screenshot -> grayscale, WORK_HEIGHT pixels tall."""
-    return _resize(_gray(frame_bgr), WORK_HEIGHT / frame_bgr.shape[0])
+    """Full screenshot -> grayscale, scaled so its HUD is WORK_HEIGHT."""
+    return _resize(_gray(frame_bgr), WORK_HEIGHT / hud_height(frame_bgr.shape))
 
 
 def prep_template(img_bgr):
@@ -102,7 +122,7 @@ def save_template(frame_path, box, event, name, folder=None):
         raise SystemExit(f"can't read {frame_path}")
     x0, y0, x1, y1 = box
     crop = frame[y0:y1, x0:x1]
-    scale = TEMPLATE_HEIGHT / frame.shape[0]
+    scale = TEMPLATE_HEIGHT / hud_height(frame.shape)
     if scale != 1.0:
         crop = cv2.resize(crop, None, fx=scale, fy=scale,
                           interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC)
@@ -120,15 +140,24 @@ def crop_frac(img, region):
     return img[y0:y0 + int(height * h), x0:x0 + int(width * w)]
 
 
+def template_region(event, filename):
+    key = f"{event}/{filename}"
+    for pattern, region in TEMPLATE_REGIONS:
+        if fnmatch.fnmatch(key, pattern):
+            return region
+    return SEARCH_REGIONS[event]
+
+
 def load_templates(folder=TEMPLATE_DIR):
-    """Returns {event: [grayscale template at matching scale, ...]} for events that have templates."""
+    """Returns {event: [(grayscale template at matching scale, search region), ...]}
+    for events that have templates."""
     templates = {}
     for event in EVENTS:
         imgs = []
         for path in sorted(glob.glob(os.path.join(folder, event, "*.png"))):
             img = cv2.imread(path)
             if img is not None:
-                imgs.append(prep_template(img))
+                imgs.append((prep_template(img), template_region(event, os.path.basename(path))))
         if imgs:
             templates[event] = imgs
     return templates
@@ -161,9 +190,14 @@ def detect(frame_bgr, templates):
     """Returns {event: best similarity score} for every event with templates."""
     gray = prep_frame(frame_bgr)
     scores = {}
+    crops = {}
     for event, tmpls in templates.items():
-        region = crop_frac(gray, SEARCH_REGIONS[event])
-        scores[event] = max(best_score(region, t) for t in tmpls)
+        best = 0.0
+        for tmpl, region in tmpls:
+            if region not in crops:
+                crops[region] = crop_frac(gray, region)
+            best = max(best, best_score(crops[region], tmpl))
+        scores[event] = best
     # Knocked needs the bar to actually be red, not just bar-shaped
     if "knocked" in scores and red_fraction(frame_bgr, SEARCH_REGIONS["knocked"]) < KNOCKED_MIN_RED:
         scores["knocked"] = min(scores["knocked"], 0.5)
@@ -293,7 +327,8 @@ def run_live(args, templates):
 
             if args.save_every and start - last_save >= args.save_every:
                 last_save = start
-                cv2.imwrite(os.path.join(args.save_dir, f"frame_{int(start * 1000)}.png"), frame)
+                cv2.imwrite(os.path.join(args.save_dir, f"frame_{int(start * 1000)}.png"), frame,
+                            [cv2.IMWRITE_PNG_COMPRESSION, 1])  # fast save, bigger file
 
             time.sleep(max(0.0, 1.0 / args.fps - (time.time() - start)))
 
