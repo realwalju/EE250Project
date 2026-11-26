@@ -304,11 +304,11 @@ def _crop(img, text, y, x=560):
 def test_template_matching_on_synthetic_frames(tmp_path):
     import detector as d
     gold, white = (40, 215, 255), (255, 255, 255)
-    for event in ("victory", "knocked"):
+    for event in ("victory", "eliminated"):
         (tmp_path / event).mkdir()
     cv2.imwrite(str(tmp_path / "victory" / "a.png"),
                 _crop(_put(_scene(1), "VICTORY ROYALE", 300, gold), "VICTORY ROYALE", 300))
-    cv2.imwrite(str(tmp_path / "knocked" / "a.png"),
+    cv2.imwrite(str(tmp_path / "eliminated" / "a.png"),
                 _crop(_put(_scene(2), "KNOCKED", 500, white), "KNOCKED", 500))
     templates = d.load_templates(str(tmp_path))
 
@@ -316,8 +316,8 @@ def test_template_matching_on_synthetic_frames(tmp_path):
         win = d.detect(_put(_scene(seed), "VICTORY ROYALE", 300, gold), templates)
         knock = d.detect(_put(_scene(seed + 100), "KNOCKED", 500, white), templates)
         other = d.detect(_put(_scene(seed + 200), "STORM IS SHRINKING", 300, white), templates)
-        assert win["victory"] >= d.THRESHOLDS["victory"] > win["knocked"]
-        assert knock["knocked"] >= d.THRESHOLDS["knocked"] > knock["victory"]
+        assert win["victory"] >= d.THRESHOLDS["victory"] > win["eliminated"]
+        assert knock["eliminated"] >= d.THRESHOLDS["eliminated"] > knock["victory"]
         assert max(other.values()) < 0.8
 
 

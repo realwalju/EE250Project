@@ -55,6 +55,8 @@ EVENTS = ["match_start", "elim", "knocked", "eliminated", "victory"]
 CENTER = (0.15, 0.05, 0.70, 0.85)
 SEARCH_REGIONS = {event: CENTER for event in EVENTS}
 SEARCH_REGIONS["elim"] = (0.15, 0.05, 0.85, 0.85)  # "+300 ENEMY ELIMINATED" pops up at the right edge
+SEARCH_REGIONS["eliminated"] = (0.15, 0.0, 0.70, 0.90)  # "ELIMINATED BY" sits at the very top edge
+SEARCH_REGIONS["knocked"] = (0.0, 0.85, 0.30, 0.15)   # red health bar + X icon, bottom-left
 
 # Similarity needed to count as "seen" (0-1). Tune with --test / --debug.
 THRESHOLDS = {event: 0.80 for event in EVENTS}
@@ -145,6 +147,16 @@ def best_score(region_gray, template):
     return best
 
 
+def red_fraction(frame_bgr, region):
+    """Share of strongly red pixels in a region. The knocked health bar is red,
+    a healthy one is green, and in grayscale the two look almost the same."""
+    b, g, r = cv2.split(crop_frac(frame_bgr, region).astype(np.int16))
+    return float(((r > 150) & (g < 90) & (r - b > 60)).mean())
+
+
+KNOCKED_MIN_RED = 0.02  # the red bar fills ~5% of the knocked search region
+
+
 def detect(frame_bgr, templates):
     """Returns {event: best similarity score} for every event with templates."""
     gray = prep_frame(frame_bgr)
@@ -152,6 +164,9 @@ def detect(frame_bgr, templates):
     for event, tmpls in templates.items():
         region = crop_frac(gray, SEARCH_REGIONS[event])
         scores[event] = max(best_score(region, t) for t in tmpls)
+    # Knocked needs the bar to actually be red, not just bar-shaped
+    if "knocked" in scores and red_fraction(frame_bgr, SEARCH_REGIONS["knocked"]) < KNOCKED_MIN_RED:
+        scores["knocked"] = min(scores["knocked"], 0.5)
     return scores
 
 
