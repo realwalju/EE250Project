@@ -95,6 +95,8 @@ class MatchState:
 
     def on_event(self, etype, now):
         """Returns a match summary dict when a match ends, otherwise None."""
+        if etype == "match_start" and self.in_match and now - self.stats["start"] < 120:
+            return None  # the bus prompt can be detected more than once on the same bus
         if etype == "match_start" or (not self.in_match and etype in GAME_EFFECTS):
             self._start(now)
         if not self.in_match:

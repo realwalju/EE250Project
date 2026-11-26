@@ -70,6 +70,10 @@ TEMPLATE_REGIONS = [
     ("elim/*double_elim*", KILL_BANNER),
 ]
 
+# A score this high is trusted from a single frame (frames without the
+# message stay under ~0.75), see ConfirmFilter.
+STRONG_SCORE = 0.88
+
 # Similarity needed to count as "seen" (0-1). Tune with --test / --debug.
 THRESHOLDS = {event: 0.80 for event in EVENTS}
 # Kill templates search small boxes (TEMPLATE_REGIONS). Live kills score ~0.8+,
@@ -206,28 +210,36 @@ def detect(frame_bgr, templates):
 
 
 class ConfirmFilter:
-    """Only report an event after it's seen in `frames` consecutive frames.
-    Each appearance is reported once (a banner that stays up for 4 s is one
-    event), and the same event is ignored for `cooldown` seconds afterward."""
+    """Only report an event after it's seen in `frames` consecutive frames,
+    or right away if it's seen with a very high score (`strong` events) -
+    on a slow PC a short banner may only land in one frame. Each appearance
+    is reported once (a banner that stays up for 4 s is one event), and the
+    same event is ignored for `cooldown` seconds afterward."""
 
     def __init__(self, frames=3, cooldown=3.0):
         self.frames = frames
         self.cooldown = cooldown
         self.streak = {}
+        self.fired = set()   # events already reported for the current appearance
         self.last_sent = {}
 
-    def update(self, seen, now):
-        """seen: set of event names detected in this frame. Returns confirmed events."""
+    def update(self, seen, now, strong=()):
+        """seen: event names detected in this frame; strong: the subset seen
+        with a score high enough to trust a single frame. Returns confirmed events."""
         confirmed = []
         for name in list(self.streak):
             if name not in seen:
                 self.streak[name] = 0
+                self.fired.discard(name)
         for name in seen:
             self.streak[name] = self.streak.get(name, 0) + 1
+            if name in self.fired:
+                continue
             last = self.last_sent.get(name)
             recently = last is not None and now - last < self.cooldown
-            if self.streak[name] == self.frames and not recently:
+            if (self.streak[name] >= self.frames or name in strong) and not recently:
                 confirmed.append(name)
+                self.fired.add(name)
                 self.last_sent[name] = now
         return confirmed
 
@@ -300,8 +312,13 @@ def run_live(args, templates):
             client.publish(topic, json.dumps(payload))
 
     confirm = ConfirmFilter(frames=2, cooldown=3.0)
+    saver = None
     if args.save_every:
         os.makedirs(args.save_dir, exist_ok=True)
+        # Save screenshots on a background thread so slow PNG writes don't
+        # slow down detection (fewer frames = short banners get missed)
+        from concurrent.futures import ThreadPoolExecutor
+        saver = ThreadPoolExecutor(max_workers=1)
     last_save = last_activity = last_debug = 0.0
 
     with mss.mss() as sct:
@@ -315,7 +332,8 @@ def run_live(args, templates):
             if templates:
                 scores = detect(frame, templates)
                 seen = {e for e, s in scores.items() if s >= THRESHOLDS[e]}
-                for event in confirm.update(seen, start):
+                strong = {e for e in seen if scores[e] >= STRONG_SCORE}
+                for event in confirm.update(seen, start, strong):
                     publish(T_GAME, {"type": event})
                     print(f"EVENT: {event}  (score {scores[event]:.2f})")
                 if args.debug and start - last_debug >= 1:
@@ -328,8 +346,8 @@ def run_live(args, templates):
 
             if args.save_every and start - last_save >= args.save_every:
                 last_save = start
-                cv2.imwrite(os.path.join(args.save_dir, f"frame_{int(start * 1000)}.png"), frame,
-                            [cv2.IMWRITE_PNG_COMPRESSION, 1])  # fast save, bigger file
+                saver.submit(cv2.imwrite, os.path.join(args.save_dir, f"frame_{int(start * 1000)}.png"),
+                             frame, [cv2.IMWRITE_PNG_COMPRESSION, 1])  # fast save, bigger file
 
             time.sleep(max(0.0, 1.0 / args.fps - (time.time() - start)))
 

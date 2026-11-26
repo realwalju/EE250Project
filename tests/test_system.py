@@ -271,6 +271,15 @@ def test_confirm_filter_counts_each_appearance_once():
     assert out[-1] == ["elim"]                     # new appearance after cooldown
 
 
+def test_confirm_filter_trusts_a_strong_single_frame():
+    c = ConfirmFilter(frames=2, cooldown=3.0)
+    assert c.update({"elim"}, 0.0, strong={"elim"}) == ["elim"]   # one 0.93 frame is enough
+    assert c.update({"elim"}, 1.2) == []                          # same banner, not twice
+    c.update(set(), 2.4)
+    assert c.update({"elim"}, 3.6) == []                          # weak single frame: wait
+    assert c.update({"elim"}, 4.8) == ["elim"]                    # ...confirmed by a 2nd frame
+
+
 cv2 = pytest.importorskip("cv2")
 
 
@@ -337,3 +346,12 @@ def test_detection_is_resolution_independent(tmp_path):
     big = cv2.resize(_put(_scene(8), "ELIMINATED", 600, white), (3200, 1800))  # same HUD, bigger screen
     assert d.detect(big, templates)["elim"] >= d.THRESHOLDS["elim"]
     assert d.detect(cv2.resize(_scene(9), (3200, 1800)), templates)["elim"] < 0.6
+
+
+def test_repeated_match_start_on_the_bus_is_ignored():
+    hub, _ = make_hub()
+    hub.handle("desk/game/event", {"type": "match_start"}, 0.0)
+    first = hub.match.match_id
+    hub.handle("desk/game/event", {"type": "elim"}, 5.0)
+    hub.handle("desk/game/event", {"type": "match_start"}, 12.0)  # prompt seen again
+    assert hub.match.match_id == first and hub.match.stats["elims"] == 1
