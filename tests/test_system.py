@@ -259,7 +259,7 @@ def test_eink_render():
 
 
 # ---------- detector ----------
-from detector import ConfirmFilter  # noqa: E402
+from detector import ConfirmFilter, KillCounter  # noqa: E402
 
 
 def test_confirm_filter_counts_each_appearance_once():
@@ -267,7 +267,10 @@ def test_confirm_filter_counts_each_appearance_once():
     out = [c.update({"elim"}, t) for t in (0, 0.1, 0.2, 0.3, 3.5)]
     assert out == [[], [], ["elim"], [], []]       # held banner = one event
     c.update(set(), 3.6)
-    out = [c.update({"elim"}, t) for t in (3.7, 3.8, 3.9)]
+    assert c.update({"elim"}, 3.7) == []           # one missed frame: still the same banner
+    c.update(set(), 3.8)
+    c.update(set(), 3.9)                           # gone for 2 checks: next one is new
+    out = [c.update({"elim"}, t) for t in (4.0, 4.1, 4.2)]
     assert out[-1] == ["elim"]                     # new appearance after cooldown
 
 
@@ -276,8 +279,62 @@ def test_confirm_filter_trusts_a_strong_single_frame():
     assert c.update({"elim"}, 0.0, strong={"elim"}) == ["elim"]   # one 0.93 frame is enough
     assert c.update({"elim"}, 1.2) == []                          # same banner, not twice
     c.update(set(), 2.4)
+    c.update(set(), 3.0)
     assert c.update({"elim"}, 3.6) == []                          # weak single frame: wait
     assert c.update({"elim"}, 4.8) == ["elim"]                    # ...confirmed by a 2nd frame
+
+
+def test_confirm_filter_survives_one_bad_frame():
+    """The bus prompt flickers with the map under it: 2 of 3 frames is enough."""
+    c = ConfirmFilter(frames=2)
+    assert c.update({"match_start"}, 0.0) == []
+    assert c.update(set(), 0.2) == []
+    assert c.update({"match_start"}, 0.4) == ["match_start"]
+
+
+def test_confirm_filter_ignores_skipped_checks():
+    c = ConfirmFilter(frames=2)
+    c.update({"victory"}, 0.0)
+    c.update(set(), 0.1, checked=set())            # victory not looked for this frame
+    assert c.update({"victory"}, 0.2) == ["victory"]
+
+
+def test_match_start_fires_once_per_bus_even_if_the_prompt_drops_out():
+    import detector as d
+    c = ConfirmFilter(frames=d.CONFIRM_FRAMES, cooldown=d.COOLDOWNS)
+    sent = []
+    # prompt up, hidden for 2 s mid-bus, back up for 20 s
+    for i in range(300):
+        t = i * 0.1
+        seen = {"match_start"} if not 5 <= t < 7 else set()
+        sent += c.update(seen, t)
+    assert sent == ["match_start"]
+
+
+def _feed(counter, counts, dt=0.15, strong=False):
+    return sum(counter.update(n, i * dt, strong=strong) for i, n in enumerate(counts))
+
+
+def test_kill_counter_counts_back_to_back_kills():
+    # ELIMINATION! banner, then it turns into DOUBLE ELIM! while still up
+    assert _feed(KillCounter(), [1, 1, 1, 2, 2, 2, 0, 0, 0, 0]) == 2
+
+
+def test_kill_counter_counts_two_popups_appearing_at_once():
+    assert _feed(KillCounter(), [0, 2, 2, 2]) == 2
+
+
+def test_kill_counter_ignores_a_flickering_banner():
+    assert _feed(KillCounter(), [1, 1, 0, 1, 1, 1]) == 1   # one blurry frame
+
+
+def test_kill_counter_counts_a_new_kill_after_the_last_one_faded():
+    assert _feed(KillCounter(), [1, 1, 1] + [0] * 6 + [1, 1]) == 2
+
+
+def test_kill_counter_needs_two_frames_unless_strong():
+    assert _feed(KillCounter(), [0, 1, 0, 0, 0]) == 0          # one weak frame
+    assert _feed(KillCounter(), [0, 1, 0, 0, 0], strong=True) == 1
 
 
 cv2 = pytest.importorskip("cv2")
@@ -355,3 +412,41 @@ def test_repeated_match_start_on_the_bus_is_ignored():
     hub.handle("desk/game/event", {"type": "elim"}, 5.0)
     hub.handle("desk/game/event", {"type": "match_start"}, 12.0)  # prompt seen again
     assert hub.match.match_id == first and hub.match.stats["elims"] == 1
+
+
+def _popup(img, y, x=1400):
+    """Small "ENEMY ELIMINATED"-style popup line on a dark plate (right side)."""
+    cv2.rectangle(img, (x - 10, y - 40), (x + 470, y + 12), (40, 30, 30), -1)
+    cv2.putText(img, "ENEMY ELIMINATED", (x, y), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 3, cv2.LINE_AA)
+    return img
+
+
+def test_stacked_kill_popups_are_counted(tmp_path):
+    """Two "ENEMY ELIMINATED" popups stacked on the right = 2 kills on screen."""
+    import detector as d
+    (tmp_path / "elim").mkdir()
+    cv2.imwrite(str(tmp_path / "elim" / "enemy_eliminated.png"), _popup(_scene(3), 500)[455:517, 1385:1885])
+    templates = d.load_templates(str(tmp_path))
+
+    single = d.detect(_popup(_scene(4), 520), templates)
+    double = d.detect(_popup(_popup(_scene(5), 460), 540), templates)
+    none = d.detect(_scene(6), templates)
+    assert single.kills == 1
+    assert double.kills == 2
+    assert none.kills == 0
+
+
+def test_white_text_prompt_matches_over_any_background(tmp_path):
+    """The bus prompt is white text straight on the map; it must score the same
+    whatever is underneath."""
+    import detector as d
+    white = (255, 255, 255)
+    (tmp_path / "match_start").mkdir()
+    shot = _put(_scene(10), "TO JUMP", 560, white, x=1000)
+    cv2.imwrite(str(tmp_path / "match_start" / "to_jump.png"), _crop(shot, "TO JUMP", 560, x=1000))
+    templates = d.load_templates(str(tmp_path))
+    for seed in range(30, 35):
+        assert d.detect(_put(_scene(seed), "TO JUMP", 560, white, x=1000), templates)["match_start"] \
+            >= d.THRESHOLDS["match_start"]
+        assert d.detect(_put(_scene(seed), "TO HURL", 560, white, x=1000), templates)["match_start"] \
+            < d.THRESHOLDS["match_start"]

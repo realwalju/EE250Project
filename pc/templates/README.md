@@ -41,6 +41,23 @@ the largest 16:9 area that fits, so the HUD size follows min(height, width x 9/1
 the height on a 16:9 screen, the width on a 16:10 laptop. If you crop by hand in
 an editor instead of `--crop`, resize the crop by 1080 / that number first.
 
+## Kill counting
+
+Back-to-back kills are counted from what's on screen, so name kill templates by
+what they show:
+
+- `*enemy_eliminated*` - one "+300 ENEMY ELIMINATED" popup line. Each stacked
+  popup counts as one kill, so crop a **single** line.
+- `*double_elim*`, `*triple_elim*`, `*quad_elim*` - the banner for 2/3/4 kills in a
+  row. If you ever get a triple, crop it as `elim/triple_elim.png` and it'll count 3.
+- anything else in `elim/` counts as 1 kill.
+
+## White text on the game world
+
+The bus "TO JUMP" prompt has no dark box behind it, so `match_start/` templates
+are matched on white pixels only (`WHITE_TEXT` in detector.py). Crop just the
+letters; the background in the crop is ignored.
+
 A message that always appears in the same spot can get its own small search box in
 `TEMPLATE_REGIONS` (detector.py), matched by file name. The kill popup and kill
 banner templates do this, which makes detection faster. Changing the in-game HUD scale
