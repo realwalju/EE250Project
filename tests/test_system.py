@@ -10,6 +10,7 @@ AI-assisted: initial version generated with Claude (Anthropic), then reviewed
 and tested by the team.
 """
 
+import json
 import os
 import sys
 import time
@@ -76,6 +77,77 @@ def test_match_state_summary():
     summary = m.on_event("eliminated", 30)
     assert summary["result"] == "loss" and summary["elims"] == 1 and summary["knocks"] == 1
     assert summary["duration_s"] == 30 and not m.in_match
+
+
+def _game(hub, etype, t):
+    hub.handle(T_GAME, {"type": etype}, t)
+
+
+def _saved_matches(hub):
+    return [json.loads(r[0]) for r in hub.db.execute("SELECT summary FROM matches ORDER BY ts")]
+
+
+def test_teammate_death_after_mine_is_not_a_new_match():
+    hub, sent = make_hub()
+    _game(hub, "match_start", 0)
+    _game(hub, "elim", 60)
+    _game(hub, "eliminated", 200)      # I die, now spectating
+    n = len(sent)
+    _game(hub, "eliminated", 320)      # teammate's death screen while spectating
+    _game(hub, "eliminated", 400)      # squad's "You placed #N" screen
+    assert len(sent) == n              # no light, no recap
+    saved = _saved_matches(hub)
+    assert len(saved) == 1 and saved[0]["elims"] == 1 and saved[0]["result"] == "loss"
+    assert hub.match.match_id == 1
+
+
+def test_reboot_continues_the_same_match():
+    hub, sent = make_hub()
+    _game(hub, "match_start", 0)
+    _game(hub, "elim", 60)
+    _game(hub, "eliminated", 200)
+    _game(hub, "elim", 400)            # rebooted and got a kill
+    assert hub.match.in_match and hub.match.match_id == 1
+    assert effects(sent)[-2:] == ["match", "elim"]  # light back to in-match
+    _game(hub, "eliminated", 600)
+    saved = _saved_matches(hub)
+    assert len(saved) == 1             # same match, summary updated
+    assert saved[0]["elims"] == 2 and saved[0]["reboots"] == 1 and saved[0]["duration_s"] == 600
+
+
+def test_team_win_after_my_death_counts_as_a_win():
+    hub, _ = make_hub()
+    _game(hub, "match_start", 0)
+    _game(hub, "eliminated", 300)
+    _game(hub, "victory", 900)
+    assert [m["result"] for m in _saved_matches(hub)] == ["win"]
+    assert hub.match.state == "lobby"
+
+
+def test_next_bus_after_dying_starts_a_new_match():
+    hub, _ = make_hub()
+    _game(hub, "match_start", 0)
+    _game(hub, "eliminated", 300)
+    _game(hub, "match_start", 500)
+    assert hub.match.in_match and hub.match.match_id == 2
+
+
+def test_match_ids_continue_after_a_hub_restart(tmp_path):
+    db = str(tmp_path / "desk.db")
+    hub = Hub(lambda *a: None, db)
+    _game(hub, "match_start", 0)
+    _game(hub, "eliminated", 100)
+    hub = Hub(lambda *a: None, db)     # Pi restarted
+    _game(hub, "match_start", 500)
+    _game(hub, "eliminated", 600)
+    assert sorted(m["match_id"] for m in _saved_matches(hub)) == [1, 2]
+
+
+def test_death_screen_with_no_match_running_is_ignored():
+    hub, sent = make_hub()
+    _game(hub, "eliminated", 10)
+    _game(hub, "victory", 20)
+    assert not sent and not _saved_matches(hub)
 
 
 def test_buttons_clip_and_study_mode():

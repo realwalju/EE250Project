@@ -86,40 +86,96 @@ class TiltDetector:
 
 
 class MatchState:
-    """Tracks lobby -> in match -> ended, and per-match stats."""
+    """Tracks lobby -> playing -> dead/ended, and per-match stats.
 
-    def __init__(self):
-        self.in_match = False
-        self.match_id = 0
+    Dying doesn't end the match for good: in squads you spectate your team and
+    can be rebooted. While "dead":
+      - another "eliminated" (a teammate's death screen, the squad's
+        "You placed #N" screen) is ignored instead of opening a fake new match
+      - a kill or knock means you were rebooted: the same match continues
+      - "victory" means your team won: the match result becomes a win
+    A new bus (match_start) or REBOOT_WINDOW without anything ends it.
+    """
+
+    SAME_BUS = 120          # s: the bus prompt can be detected more than once on the same bus
+    REBOOT_WINDOW = 20 * 60  # s: after this long dead, the match is over for sure
+
+    def __init__(self, last_match_id=0):
+        self.state = "lobby"   # "lobby" | "playing" | "dead"
+        self.match_id = last_match_id
         self.stats = {}
+        self.dead_since = None
+        self.ignored = False   # True if the last event didn't count (see Hub.on_game)
+
+    @property
+    def in_match(self):
+        return self.state == "playing"
 
     def on_event(self, etype, now):
-        """Returns a match summary dict when a match ends, otherwise None."""
-        if etype == "match_start" and self.in_match and now - self.stats["start"] < 120:
-            return None  # the bus prompt can be detected more than once on the same bus
-        if etype == "match_start" or (not self.in_match and etype in GAME_EFFECTS):
+        """Returns a match summary dict when a match ends (or its result
+        changes after a reboot / team win), otherwise None."""
+        self.ignored = False
+        if self.state == "dead" and now - self.dead_since > self.REBOOT_WINDOW:
+            self.state = "lobby"
+
+        if etype == "match_start":
+            if self.state != "lobby" and now - self.stats["start"] < self.SAME_BUS:
+                self.ignored = True
+                return None
             self._start(now)
-        if not self.in_match:
             return None
+
+        if self.state == "lobby":
+            if etype not in ("elim", "knocked"):
+                # a death/victory screen with no match running (e.g. spectating
+                # after the match already ended) - don't invent a 0-kill match
+                self.ignored = True
+                return None
+            self._start(now)  # hub started mid-match: count from here
+
+        if self.state == "dead":
+            if etype in ("elim", "knocked"):
+                self.state = "playing"  # rebooted
+                self.stats["reboots"] += 1
+                self._log("reboot", now)
+            elif etype == "victory":
+                self.state = "lobby"
+                self._log("victory", now)
+                return self._summary("win", now)  # your squad won after you died
+            else:
+                self.ignored = True
+                return None
 
         if etype == "elim":
             self.stats["elims"] += 1
         elif etype == "knocked":
             self.stats["knocks"] += 1
-        self.stats["timeline"].append({"t": round(now - self.stats["start"], 1), "type": etype})
+        self._log(etype, now)
 
+        if etype == "eliminated":
+            self.state = "dead"
+            self.dead_since = now
+            return self._summary("loss", now)
         if etype in MATCH_END_EVENTS:
-            self.in_match = False
-            summary = dict(self.stats)
-            summary["result"] = "win" if etype == "victory" else "loss" if etype == "eliminated" else "ended"
-            summary["duration_s"] = round(now - self.stats["start"], 1)
-            return summary
+            self.state = "lobby"
+            return self._summary("win" if etype == "victory" else "ended", now)
         return None
 
+    def _log(self, etype, now):
+        self.stats["timeline"].append({"t": round(now - self.stats["start"], 1), "type": etype})
+
+    def _summary(self, result, now):
+        summary = dict(self.stats, timeline=list(self.stats["timeline"]))
+        summary["result"] = result
+        summary["duration_s"] = round(now - self.stats["start"], 1)
+        return summary
+
     def _start(self, now):
-        self.in_match = True
+        self.state = "playing"
         self.match_id += 1
-        self.stats = {"match_id": self.match_id, "start": now, "elims": 0, "knocks": 0, "timeline": []}
+        self.dead_since = None
+        self.stats = {"match_id": self.match_id, "start": now, "elims": 0, "knocks": 0,
+                      "reboots": 0, "timeline": []}
 
 
 class Hub:
@@ -127,7 +183,6 @@ class Hub:
         self.publish = publish  # publish(topic, dict) - injected so logic is testable
         self.display = display  # EinkDisplay or None
         self.lock = threading.RLock()  # MQTT, Flask and recap threads all touch hub state
-        self.match = MatchState()
         self.tilt = TiltDetector()
         self.study_mode = False
         self.latest_sensors = {}
@@ -136,6 +191,10 @@ class Hub:
         self.feed_id = 0
         self.db = sqlite3.connect(db_path, check_same_thread=False)
         self._init_db()
+        # keep counting match ids from the database, so a hub restart doesn't
+        # reuse an old id (a rebooted match replaces its earlier summary by id)
+        last_id = self.db.execute("SELECT MAX(match_id) FROM matches").fetchone()[0] or 0
+        self.match = MatchState(last_id)
         self.companion = Companion(on_update=self._companion_changed)
 
     def _init_db(self):
@@ -230,6 +289,11 @@ class Hub:
         self.add_feed("game", data)
         was_in_match = self.match.in_match
         summary = self.match.on_event(etype, now)
+        if self.match.ignored:
+            # e.g. a teammate's death screen while you spectate, or the bus
+            # prompt seen again: logged, but no light, reaction or new match
+            print(f"  (ignored: {etype} while {self.match.state})")
+            return
 
         if self.match.in_match and not was_in_match:
             self.study_mode = False
@@ -277,8 +341,10 @@ class Hub:
         self.companion.react("tilt")
 
     def on_match_end(self, summary, now):
-        print(f"match {summary['match_id']} ended: {summary['result']}, "
+        print(f"match {summary['match_id']} result: {summary['result']}, "
               f"{summary['elims']} elims, {summary['duration_s']}s")
+        # a reboot or a squad win after you died updates the same match
+        self.db.execute("DELETE FROM matches WHERE match_id = ?", (summary["match_id"],))
         self.db.execute("INSERT INTO matches VALUES (?, ?, ?)",
                         (now, summary["match_id"], json.dumps(summary)))
         self.db.commit()

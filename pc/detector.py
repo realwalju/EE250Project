@@ -56,7 +56,12 @@ T_ACTIVITY = "desk/pc/activity"
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(HERE, "templates")
 
-EVENTS = ["match_start", "elim", "knocked", "eliminated", "victory"]
+EVENTS = ["match_start", "elim", "knocked", "eliminated", "victory", "spectating"]
+# "spectating" is never sent to the Pi. While you spectate a teammate their
+# kill banners and knocks show on your screen, and the Pi would read your next
+# "kill" as a reboot - so elim/knocked aren't sent while it's on screen (or was
+# in the last SPECTATING_HOLD seconds). Optional: no templates = no effect.
+SPECTATING_HOLD = 3.0
 
 # Where on screen to look for each event, as fractions of the screen
 # (left, top, width, height). The default is a wide center area; tighten a
@@ -67,6 +72,7 @@ SEARCH_REGIONS = {event: CENTER for event in EVENTS}
 SEARCH_REGIONS["elim"] = (0.15, 0.05, 0.85, 0.85)  # "+300 ENEMY ELIMINATED" pops up at the right edge
 SEARCH_REGIONS["eliminated"] = (0.15, 0.0, 0.70, 0.90)  # "ELIMINATED BY" sits at the very top edge
 SEARCH_REGIONS["knocked"] = (0.0, 0.85, 0.30, 0.15)   # red health bar + X icon, bottom-left
+SEARCH_REGIONS["spectating"] = (0.0, 0.0, 1.0, 1.0)  # whole screen until we know where the label sits
 
 # Some messages always appear in the same spot, so their templates only search
 # a small box there (much faster than the whole event region, and fewer false
@@ -128,7 +134,7 @@ COOLDOWNS["match_start"] = 90.0
 
 # These screens stay up for seconds, so they're only checked every
 # SLOW_EVERY frames - their big search areas are the most expensive part.
-SLOW_EVENTS = {"eliminated", "victory"}
+SLOW_EVENTS = {"eliminated", "victory", "spectating"}
 SLOW_EVERY = 3
 
 # Resolution independence: Fortnite sizes its HUD to the largest 16:9 area
@@ -530,6 +536,7 @@ def run_live(args, templates):
         from concurrent.futures import ThreadPoolExecutor
         saver = ThreadPoolExecutor(max_workers=1)
     last_save = last_activity = last_debug = 0.0
+    last_spectating = -1e9
     frame_no = 0
     loop_times = []
 
@@ -545,18 +552,26 @@ def run_live(args, templates):
                 skip = SLOW_EVENTS if frame_no % SLOW_EVERY else set()
                 frame_no += 1
                 scores = detect(frame, templates, pool, skip=skip)
+                if scores.get("spectating", 0) >= THRESHOLDS["spectating"]:
+                    last_spectating = start
+                spectating = start - last_spectating < SPECTATING_HOLD
                 # Kills are counted separately so back-to-back kills each count
                 if "elim" in scores:
                     n = kills.update(scores.kills, start, strong=scores.kill_score >= STRONG_SCORE,
                                      hold=scores.kills_hold)
-                    for _ in range(n):
-                        publish(T_GAME, {"type": "elim"})
-                    if n:
+                    if n and spectating:
+                        print(f"(teammate's elim x{n} while spectating - not sent)")
+                    elif n:
+                        for _ in range(n):
+                            publish(T_GAME, {"type": "elim"})
                         print(f"EVENT: elim x{n}  (on screen {scores.kills}, score {scores.kill_score:.2f})")
-                others = {e: s for e, s in scores.items() if e != "elim"}
+                others = {e: s for e, s in scores.items() if e not in ("elim", "spectating")}
                 seen = {e for e, s in others.items() if s >= THRESHOLDS[e]}
                 strong = {e for e in seen if others[e] >= STRONG_SCORE}
                 for event in confirm.update(seen, start, strong, checked=set(others)):
+                    if spectating and event == "knocked":
+                        print("(teammate knocked while spectating - not sent)")
+                        continue
                     publish(T_GAME, {"type": event})
                     print(f"EVENT: {event}  (score {scores[event]:.2f})")
                 if args.debug and start - last_debug >= 1:

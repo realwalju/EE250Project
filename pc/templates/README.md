@@ -10,6 +10,7 @@ templates/
   knocked/       the "knocked" / down-but-not-out message
   elim/          the "ELIMINATED <name>" message when you get a kill
   match_start/   optional, e.g. the "JUMP" prompt on the Battle Bus
+  spectating/    optional: the "SPECTATING" label shown after you die in squads
 ```
 
 Events without templates are simply skipped.
@@ -51,6 +52,15 @@ what they show:
 - `*double_elim*`, `*triple_elim*`, `*quad_elim*` - the banner for 2/3/4 kills in a
   row. If you ever get a triple, crop it as `elim/triple_elim.png` and it'll count 3.
 - anything else in `elim/` counts as 1 kill.
+
+## Spectating (squads)
+
+After you die in squads you spectate a teammate, and their kill banners and
+knocks show on your screen. The Pi treats a kill after your death as a reboot,
+so a teammate's kill would wrongly bring your match back. Crop the
+"SPECTATING" label (or the spectated player's name bar) into `spectating/` and
+the detector stops sending kills and knocks while it's on screen. It is never
+sent to the Pi itself.
 
 ## White text on the game world
 
