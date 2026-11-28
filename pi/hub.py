@@ -92,13 +92,15 @@ class MatchState:
     can be rebooted. While "dead":
       - another "eliminated" (a teammate's death screen, the squad's
         "You placed #N" screen) is ignored instead of opening a fake new match
-      - a kill or knock means you were rebooted: the same match continues
+      - a kill means you were rebooted: the same match continues (a knock
+        doesn't - the knocked bar can still be on screen after you die)
       - "victory" means your team won: the match result becomes a win
     A new bus (match_start) or REBOOT_WINDOW without anything ends it.
     """
 
     SAME_BUS = 120          # s: the bus prompt can be detected more than once on the same bus
     REBOOT_WINDOW = 20 * 60  # s: after this long dead, the match is over for sure
+    KNOCK_GAP = 15           # s: a revive takes ~10 s, so knocks closer than this are one knock
 
     def __init__(self, last_match_id=0):
         self.state = "lobby"   # "lobby" | "playing" | "dead"
@@ -106,6 +108,7 @@ class MatchState:
         self.stats = {}
         self.dead_since = None
         self.ignored = False   # True if the last event didn't count (see Hub.on_game)
+        self.last_knock = -1e9
 
     @property
     def in_match(self):
@@ -133,8 +136,15 @@ class MatchState:
                 return None
             self._start(now)  # hub started mid-match: count from here
 
+        if etype == "knocked" and self.state == "playing" and \
+                now - self.last_knock < self.KNOCK_GAP:
+            self.ignored = True  # same knock seen again (the red bar stays up while you're down)
+            return None
+
         if self.state == "dead":
-            if etype in ("elim", "knocked"):
+            # Only a kill proves a reboot: the red knocked bar can still be
+            # detected on the death screen or on a spectated teammate.
+            if etype == "elim":
                 self.state = "playing"  # rebooted
                 self.stats["reboots"] += 1
                 self._log("reboot", now)
@@ -150,6 +160,7 @@ class MatchState:
             self.stats["elims"] += 1
         elif etype == "knocked":
             self.stats["knocks"] += 1
+            self.last_knock = now
         self._log(etype, now)
 
         if etype == "eliminated":

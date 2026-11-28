@@ -150,6 +150,28 @@ def test_death_screen_with_no_match_running_is_ignored():
     assert not sent and not _saved_matches(hub)
 
 
+def test_knocked_then_eliminated_counts_one_knock():
+    hub, sent = make_hub()
+    _game(hub, "match_start", 0)
+    _game(hub, "knocked", 100)
+    _game(hub, "knocked", 106)         # red bar seen again while still down
+    _game(hub, "eliminated", 130)
+    _game(hub, "knocked", 133)         # red bar still detected on the death screen
+    _game(hub, "eliminated", 140)      # death screen seen again
+    _game(hub, "knocked", 160)
+    saved = _saved_matches(hub)
+    assert len(saved) == 1 and saved[0]["knocks"] == 1 and saved[0]["reboots"] == 0
+    assert hub.match.state == "dead"
+
+
+def test_knocked_again_after_a_revive_counts():
+    hub, _ = make_hub()
+    _game(hub, "match_start", 0)
+    _game(hub, "knocked", 100)
+    _game(hub, "knocked", 160)         # revived, knocked again later
+    assert hub.match.stats["knocks"] == 2
+
+
 def test_buttons_clip_and_study_mode():
     hub, sent = make_hub()
     hub.handle(T_BUTTON, {"id": "clip"}, 1.0)
@@ -381,6 +403,22 @@ def test_match_start_fires_once_per_bus_even_if_the_prompt_drops_out():
         seen = {"match_start"} if not 5 <= t < 7 else set()
         sent += c.update(seen, t)
     assert sent == ["match_start"]
+
+
+def test_knocked_bar_dropping_out_counts_once():
+    import detector as d
+    c = ConfirmFilter(frames=d.CONFIRM_FRAMES, cooldown=d.COOLDOWNS, end_after=d.END_AFTER)
+    sent = []
+    # down for 40 s at 5 fps; the red bar drops out for 1 s every 6 s
+    for i in range(200):
+        t = i * 0.2
+        sent += c.update(set() if t % 6 < 1 else {"knocked"}, t)
+    assert sent == ["knocked"]
+    # gone for good, then knocked again later: counts
+    for i in range(200, 400):
+        t = i * 0.2
+        sent += c.update({"knocked"} if t >= 70 else set(), t)
+    assert sent == ["knocked", "knocked"]
 
 
 def _feed(counter, counts, dt=0.15, strong=False):

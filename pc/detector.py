@@ -131,6 +131,14 @@ CONFIRM_FRAMES["match_start"] = 3
 # start that soon anyway.
 COOLDOWNS = {event: 3.0 for event in EVENTS}
 COOLDOWNS["match_start"] = 90.0
+# You stay knocked for up to a minute and the red bar drops out of detection
+# now and then; a revive takes ~10 s, so a real second knock can't come sooner.
+COOLDOWNS["knocked"] = 15.0
+
+# Seconds an event must be completely gone before it can count again. The
+# knocked bar is on screen the whole time you're down - a couple of missed
+# frames mustn't make one knock count as several.
+END_AFTER = {"knocked": 8.0}
 
 # These screens stay up for seconds, so they're only checked every
 # SLOW_EVERY frames - their big search areas are the most expensive part.
@@ -363,12 +371,15 @@ class ConfirmFilter:
     `end_misses` checks in a row without it (one blurry frame in a 10 s victory
     screen must not make it fire twice), and the same event is ignored for
     `cooldown` seconds afterward. `frames` and `cooldown` can be a number or
-    {event: number}."""
+    {event: number}. `end_after` ({event: seconds}) makes an event also stay
+    "the same appearance" until it's been gone that long (knocked bar)."""
 
-    def __init__(self, frames=2, cooldown=3.0, end_misses=2):
+    def __init__(self, frames=2, cooldown=3.0, end_misses=2, end_after=None):
         self.frames = frames
         self.cooldown = cooldown
         self.end_misses = end_misses
+        self.end_after = end_after or {}
+        self.last_seen = {}
         self.history = {}    # event -> recent seen/not-seen checks
         self.misses = {}
         self.fired = set()   # events already reported for the current appearance
@@ -396,10 +407,12 @@ class ConfirmFilter:
             del hist[:-(need + 1)]
             if name not in seen:
                 self.misses[name] = self.misses.get(name, 0) + 1
-                if self.misses[name] >= self.end_misses:
+                gone_for = now - self.last_seen.get(name, now)
+                if self.misses[name] >= self.end_misses and gone_for >= self.end_after.get(name, 0):
                     self.fired.discard(name)
                 continue
             self.misses[name] = 0
+            self.last_seen[name] = now
             if name in self.fired:
                 continue
             last = self.last_sent.get(name)
@@ -525,7 +538,7 @@ def run_live(args, templates):
         if client:
             client.publish(topic, json.dumps(payload))
 
-    confirm = ConfirmFilter(frames=CONFIRM_FRAMES, cooldown=COOLDOWNS)
+    confirm = ConfirmFilter(frames=CONFIRM_FRAMES, cooldown=COOLDOWNS, end_after=END_AFTER)
     kills = KillCounter()
     pool = make_pool()
     saver = None
