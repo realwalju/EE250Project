@@ -164,6 +164,17 @@ def test_knocked_then_eliminated_counts_one_knock():
     assert hub.match.state == "dead"
 
 
+def test_spectated_teammate_knock_plays_the_light_but_isnt_counted():
+    hub, sent = make_hub()
+    _game(hub, "match_start", 0)
+    _game(hub, "eliminated", 100)      # I'm out, spectating
+    n = len(sent)
+    _game(hub, "knocked", 200)         # teammate goes down
+    assert effects(sent[n:]) == ["knocked"]
+    assert hub.match.state == "dead" and hub.match.stats["knocks"] == 0
+    assert _saved_matches(hub)[0]["knocks"] == 0
+
+
 def test_knocked_again_after_a_revive_counts():
     hub, _ = make_hub()
     _game(hub, "match_start", 0)

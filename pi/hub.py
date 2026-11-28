@@ -302,8 +302,10 @@ class Hub:
         summary = self.match.on_event(etype, now)
         if self.match.ignored:
             # e.g. a teammate's death screen while you spectate, or the bus
-            # prompt seen again: logged, but no light, reaction or new match
-            print(f"  (ignored: {etype} while {self.match.state})")
+            # prompt seen again: logged, but no reaction, stats or new match
+            print(f"  (not counted: {etype} while {self.match.state})")
+            if etype == "knocked" and self.match.state == "dead":
+                self.effect(GAME_EFFECTS["knocked"])  # spectated teammate went down: light only
             return
 
         if self.match.in_match and not was_in_match:
